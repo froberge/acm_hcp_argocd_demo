@@ -10,6 +10,8 @@ spec:
   destinations:
     - server: "*"
       namespace: local-cluster
+    - server: "*"
+      namespace: "*"
   clusterResourceWhitelist:
     - group: hypershift.openshift.io
       kind: HostedCluster
