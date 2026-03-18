@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: hcp-project
+  namespace: openshift-gitops
+spec:
+  description: Project for managing OpenShift Hosted Control Plane clusters
+  sourceRepos:
+    - https://github.com/froberge/acm_hcp_argocd_demo
+  destinations:
+    - server: "*"
+      namespace: local-cluster
+  clusterResourceWhitelist:
+    - group: hypershift.openshift.io
+      kind: HostedCluster
+  namespaceResourceWhitelist:
+    - group: hypershift.openshift.io
+      kind: NodePool

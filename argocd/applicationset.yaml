@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: hcp-applicationset
+  namespace: openshift-gitops
+spec:
+  generators:
+    - clusterDecisionResource:
+        configMapRef: acm-placement
+        labelSelector:
+          matchLabels:
+            cluster.open-cluster-management.io/placement: hcp-placement
+        requeueAfterSeconds: 180
+  template:
+    metadata:
+      name: "hcp-{{name}}"
+    spec:
+      project: hcp-project
+      source:
+        repoURL: https://github.com/froberge/acm_hcp_argocd_demo
+        targetRevision: main
+        path: hcp
+      destination:
+        server: "{{server}}"
+        namespace: local-cluster
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false
