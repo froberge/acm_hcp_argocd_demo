@@ -57,13 +57,13 @@ spec:
         storageARN: arn:aws:iam::039612890667:role/demo-hl7tn-aws-ebs-csi-driver-controller
     type: AWS
   pullSecret:
-    name: demo-pull-secret
+    name: development-pull-secret
   release:
     image: quay.io/openshift-release-dev/ocp-release:4.14.3-x86_64
   secretEncryption:
     aescbc:
       activeKey:
-        name: demo-etcd-encryption-key
+        name: development-etcd-encryption-key
     type: aescbc
   services:
   - service: APIServer
@@ -82,4 +82,4 @@ spec:
     servicePublishingStrategy:
       type: Route
   sshKey:
-    name: demo-ssh-key
+    name: development-ssh-key
