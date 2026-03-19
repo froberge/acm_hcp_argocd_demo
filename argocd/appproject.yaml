@@ -12,9 +12,8 @@ spec:
       namespace: local-cluster
     - server: "*"
       namespace: "*"
-  clusterResourceWhitelist:
+  namespaceResourceWhitelist:
     - group: hypershift.openshift.io
       kind: HostedCluster
-  namespaceResourceWhitelist:
     - group: hypershift.openshift.io
       kind: NodePool

@@ -2,6 +2,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
+  - acm-placement-configmap.yaml
+  - gitopscluster-rbac.yaml
+  - argocd-hypershift-rbac.yaml
   - managedclustersetbinding.yaml
   - placement.yaml
   - gitopscluster.yaml

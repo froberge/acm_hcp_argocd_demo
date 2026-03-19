@@ -11,6 +11,7 @@ acm_hcp_argocd_demo/
 │   └── nodePool.yaml                 # NodePool resource
 └── argocd/                           # ACM GitOps + ArgoCD artifacts
     ├── kustomization.yaml
+    ├── acm-placement-configmap.yaml  # Teaches ArgoCD how to read ACM PlacementDecisions
     ├── managedclustersetbinding.yaml # Binds ClusterSet to openshift-gitops namespace
     ├── placement.yaml                # ACM Placement selecting the hub (local-cluster)
     ├── gitopscluster.yaml            # Registers clusters with ArgoCD via ACM
@@ -32,11 +33,12 @@ oc apply -k argocd/
 
 Resources are applied in the following order by the kustomization:
 
-1. `managedclustersetbinding.yaml` — binds the `default` ManagedClusterSet into the `openshift-gitops` namespace
-2. `placement.yaml` — ACM Placement that selects the hub cluster (`local-cluster: "true"`)
-3. `gitopscluster.yaml` — ACM GitOpsCluster that registers the selected clusters with the ArgoCD instance
-4. `appproject.yaml` — ArgoCD AppProject (`hcp-project`) whitelisting HyperShift resource kinds
-5. `applicationset.yaml` — ArgoCD ApplicationSet that generates an Application from the placement and syncs `hcp/`
+1. `acm-placement-configmap.yaml` — ConfigMap (`acm-placement`) that teaches the ArgoCD `clusterDecisionResource` generator the API shape of ACM `PlacementDecision` objects
+2. `managedclustersetbinding.yaml` — binds the `default` ManagedClusterSet into the `openshift-gitops` namespace
+3. `placement.yaml` — ACM Placement that selects the hub cluster (`local-cluster: "true"`)
+4. `gitopscluster.yaml` — ACM GitOpsCluster that registers the selected clusters with the ArgoCD instance
+5. `appproject.yaml` — ArgoCD AppProject (`hcp-project`) whitelisting HyperShift resource kinds
+6. `applicationset.yaml` — ArgoCD ApplicationSet that generates an Application from the placement and syncs `hcp/`
 
 ### Step 2 — ArgoCD automatically reconciles the HCP manifests
 

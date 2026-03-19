@@ -1,0 +1,90 @@
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedCluster
+metadata:
+  labels:
+    hypershift.openshift.io/auto-created-for-infra: demo-hl7tn
+  name: demo
+  namespace: local-cluster
+spec:
+  # # Replace with the UUID generated during cluster provisioning
+  # clusterID: <demo-cluster-uuid>
+  controllerAvailabilityPolicy: SingleReplica
+  dns:
+    baseDomain: sandbox5342.opentlc.com
+    # Replace with Route53 zone IDs provisioned for the demo cluster
+    # privateZoneID: <demo-private-zone-id>
+    # publicZoneID: <demo-public-zone-id>
+  etcd:
+    managed:
+      storage:
+        persistentVolume:
+          size: 8Gi
+          storageClassName: gp3-csi
+        type: PersistentVolume
+    managementType: Managed
+  fips: false
+  # Replace with the infraID generated during cluster provisioning (e.g. demo-ab1cd)
+  infraID: demo-hl7tn
+  infrastructureAvailabilityPolicy: SingleReplica
+  # Replace with the OIDC issuer URL for the demo infraID
+  issuerURL: https://oidc-storage-hl7tn.s3.us-east-2.amazonaws.com/demo-hl7tn
+  networking:
+    clusterNetwork:
+    - cidr: 10.132.0.0/14
+    machineNetwork:
+    - cidr: 10.0.0.0/16
+    networkType: OVNKubernetes
+    serviceNetwork:
+    - cidr: 172.31.0.0/16
+  olmCatalogPlacement: management
+  platform:
+    aws:
+      cloudProviderConfig:
+        # subnet:
+        #   # Replace with the subnet ID for the demo cluster
+        #   id: <demo-subnet-id>
+        # # Replace with the VPC ID for the demo cluster
+        # vpc: <demo-vpc-id>
+        zone: us-west-2a
+      endpointAccess: Public
+      region: us-west-2
+      resourceTags:
+      - key: kubernetes.io/cluster/demo-hl7tn
+        value: owned
+      rolesRef:
+        # Replace all ARNs below with IAM roles provisioned for the demo infraID
+        controlPlaneOperatorARN: arn:aws:iam::039612890667:role/demo-hl7tn-control-plane-operator
+        imageRegistryARN: arn:aws:iam::039612890667:role/demo-hl7tn-openshift-image-registry
+        ingressARN: arn:aws:iam::039612890667:role/demo-hl7tn-openshift-ingress
+        kubeCloudControllerARN: arn:aws:iam::039612890667:role/demo-hl7tn-cloud-controller
+        networkARN: arn:aws:iam::039612890667:role/demo-hl7tn-cloud-network-config-controller
+        nodePoolManagementARN: arn:aws:iam::039612890667:role/demo-hl7tn-node-pool
+        storageARN: arn:aws:iam::039612890667:role/demo-hl7tn-aws-ebs-csi-driver-controller
+    type: AWS
+  pullSecret:
+    name: demo-pull-secret
+  release:
+    image: quay.io/openshift-release-dev/ocp-release:4.14.3-x86_64
+  secretEncryption:
+    aescbc:
+      activeKey:
+        name: demo-etcd-encryption-key
+    type: aescbc
+  services:
+  - service: APIServer
+    servicePublishingStrategy:
+      type: LoadBalancer
+  - service: OAuthServer
+    servicePublishingStrategy:
+      type: Route
+  - service: Konnectivity
+    servicePublishingStrategy:
+      type: Route
+  - service: Ignition
+    servicePublishingStrategy:
+      type: Route
+  - service: OVNSbDb
+    servicePublishingStrategy:
+      type: Route
+  sshKey:
+    name: demo-ssh-key
