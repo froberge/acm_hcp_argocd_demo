@@ -41,7 +41,7 @@ spec:
         subnet:
           id: subnet-0dc056e436e2f706d
         vpc: vpc-051ce05d962dfb62f
-        zone: us-west-1b
+        zone: us-west-2b
       endpointAccess: Public
       region: us-west-1
       resourceTags:
