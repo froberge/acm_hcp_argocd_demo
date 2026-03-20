@@ -1,19 +1,8 @@
 apiVersion: hypershift.openshift.io/v1beta1
 kind: HostedCluster
 metadata:
-  annotations:
-    create-external-hub-kubeconfig: '2026-03-20T17:22:32Z'
-  creationTimestamp: '2026-03-20T17:19:32Z'
-  finalizers:
-  - hypershift.openshift.io/finalizer
-  - hypershift.io/aws-oidc-discovery
-  generation: 3
-  labels:
-    hypershift.openshift.io/auto-created-for-infra: testing-hl7tn
   name: testing
   namespace: local-cluster
-  resourceVersion: '2846105'
-  uid: ee6f3a0b-2964-4184-83b4-8c7de7806fb1
 spec:
   autoscaling: {}
   clusterID: de9bfb49-6452-414d-bbb1-90f3b3e23b1a

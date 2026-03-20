@@ -1,12 +1,6 @@
 apiVersion: hypershift.openshift.io/v1beta1
 kind: NodePool
 metadata:
-  annotations:
-    hypershift.openshift.io/nodePoolCurrentConfig: 31eefb9b
-    hypershift.openshift.io/nodePoolCurrentConfigVersion: d8068ccb
-    hypershift.openshift.io/nodePoolPlatformMachineTemplate: development-us-west-2a-8561cab0
-  labels:
-    hypershift.openshift.io/auto-created-for-infra: dev-hl7tn
   name: development-us-west-2a
   namespace: local-cluster
 spec:

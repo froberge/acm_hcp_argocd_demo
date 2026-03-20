@@ -1,25 +1,8 @@
 apiVersion: hypershift.openshift.io/v1beta1
 kind: NodePool
 metadata:
-  annotations:
-    hypershift.openshift.io/nodePoolCurrentConfig: 8401e4b4
-    hypershift.openshift.io/nodePoolCurrentConfigVersion: a757e94e
-    hypershift.openshift.io/nodePoolPlatformMachineTemplate: testing-us-west-2a-b93832a9
-  creationTimestamp: '2026-03-20T17:19:32Z'
-  finalizers:
-  - hypershift.openshift.io/finalizer
-  generation: 1
-  labels:
-    hypershift.openshift.io/auto-created-for-infra: testing-hl7tn
   name: testing-us-west-2a
   namespace: local-cluster
-  ownerReferences:
-  - apiVersion: hypershift.openshift.io/v1beta1
-    kind: HostedCluster
-    name: testing
-    uid: ee6f3a0b-2964-4184-83b4-8c7de7806fb1
-  resourceVersion: '2846312'
-  uid: 325d0c1d-7798-4c6e-8639-d44e32af5477
 spec:
   arch: amd64
   clusterName: testing

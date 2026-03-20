@@ -1,10 +1,6 @@
 apiVersion: hypershift.openshift.io/v1beta1
 kind: HostedCluster
 metadata:
-  annotations:
-    create-external-hub-kubeconfig: "2026-03-18T10:53:31Z"
-  labels:
-    hypershift.openshift.io/auto-created-for-infra: dev-hl7tn
   name: development
   namespace: local-cluster
 spec:

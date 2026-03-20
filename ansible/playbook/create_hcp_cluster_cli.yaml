@@ -177,14 +177,15 @@
           ansible.builtin.set_fact:
             hc_clean: >-
               {{
-                hc_raw.stdout | from_json
-                | combine({'status': omit}, recursive=true)
-                | combine({
-                    'metadata': (hc_raw.stdout | from_json).metadata
-                    | dict2items
-                    | rejectattr('key', 'in', ['managedFields', 'resourceVersion', 'uid', 'creationTimestamp', 'generation', 'annotations'])
-                    | items2dict
-                  }, recursive=true)
+                {
+                  'apiVersion': (hc_raw.stdout | from_json).apiVersion,
+                  'kind': (hc_raw.stdout | from_json).kind,
+                  'metadata': {
+                    'name': (hc_raw.stdout | from_json).metadata.name,
+                    'namespace': (hc_raw.stdout | from_json).metadata.namespace
+                  },
+                  'spec': (hc_raw.stdout | from_json).spec
+                }
               }}
 
         - name: Write hosted_cluster_{{ cluster_name }}.yaml into hcp/
@@ -208,14 +209,15 @@
           ansible.builtin.set_fact:
             np_clean: >-
               {{
-                np_raw.stdout | from_json
-                | combine({'status': omit}, recursive=true)
-                | combine({
-                    'metadata': (np_raw.stdout | from_json).metadata
-                    | dict2items
-                    | rejectattr('key', 'in', ['managedFields', 'resourceVersion', 'uid', 'creationTimestamp', 'generation', 'annotations'])
-                    | items2dict
-                  }, recursive=true)
+                {
+                  'apiVersion': (np_raw.stdout | from_json).apiVersion,
+                  'kind': (np_raw.stdout | from_json).kind,
+                  'metadata': {
+                    'name': (np_raw.stdout | from_json).metadata.name,
+                    'namespace': (np_raw.stdout | from_json).metadata.namespace
+                  },
+                  'spec': (np_raw.stdout | from_json).spec
+                }
               }}
 
         - name: Write nodePool_{{ cluster_name }}.yaml into hcp/
