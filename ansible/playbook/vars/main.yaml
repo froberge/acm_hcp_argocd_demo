@@ -21,7 +21,7 @@ kubeconfig: /home/lab-user/.kube/config
 # ==============================================================================
 # Cluster Identity
 # ==============================================================================
-cluster_name: demo2
+#cluster_name:  As a parameter when lauching the playbook
 cluster_namespace: local-cluster
 guid: hl7tn
 
