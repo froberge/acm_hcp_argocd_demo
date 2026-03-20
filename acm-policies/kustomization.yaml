@@ -3,3 +3,4 @@ kind: Kustomization
 
 resources:
   - openshift-gitops-policy.yaml
+  - openshift-pipelines-policy.yaml
