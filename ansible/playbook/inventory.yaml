@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# Ansible Inventory: inventory.yaml
+#
+# Defines the bastion VM that the playbook runs on.
+# All tasks (hcp CLI, kubernetes.core API calls, file writes) execute
+# on the bastion over SSH.
+#
+# Usage:
+#   ansible-playbook create_hcp_cluster_cli.yaml \
+#     -i inventory.yaml \
+#     -e @vars/main.yaml \
+#     --ask-pass
+#
+# --- Option B (Ansible Vault, no interactive prompt) -------------------------
+# 1. Create an encrypted vars file:  ansible-vault create vars/vault.yaml
+#    Add inside:  vault_bastion_password: "your-password"
+# 2. Uncomment ansible_password below
+# 3. Run:
+#   ansible-playbook create_hcp_cluster_cli.yaml \
+#     -i inventory.yaml \
+#     -e @vars/main.yaml \
+#     -e @vars/vault.yaml \
+#     --ask-vault-pass
+# =============================================================================
+all:
+  hosts:
+    bastion:
+      ansible_host: "{{ bastion_host }}"
+      ansible_user: "{{ bastion_user }}"
+      ansible_python_interpreter: /usr/bin/python3.9
+      ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+      ansible_password: "{{ vault_bastion_password }}"

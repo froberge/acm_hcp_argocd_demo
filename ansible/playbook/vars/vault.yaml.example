@@ -1,0 +1,24 @@
+# =============================================================================
+# Ansible Vault — bastion password for [acmdemo]
+#
+# This file is a PLAINTEXT EXAMPLE. You must encrypt it before use:
+#
+#   Step 1 — Copy this file:
+#     cp ansible/playbook/vars/vault.yaml.example ansible/playbook/vars/vault.yaml
+#
+#   Step 2 - Remove all the comment in the new created file
+#
+#   Step 3 — Set your password, then encrypt:
+#     ansible-vault encrypt ansible/playbook/vars/vault.yaml
+#
+#   Step 4 — Uncomment ansible_password in inventory.yaml
+#
+#   Step 5 — Run the playbook:
+#     ansible-playbook ansible/playbook/create_hcp_cluster_cli.yaml \
+#       -i ansible/playbook/inventory.yaml \
+#       -e @ansible/playbook/vars/main.yaml \
+#       -e @ansible/playbook/vars/vault.yaml \
+#       --ask-vault-pass
+# =============================================================================
+
+vault_bastion_password: "REPLACE_WITH_YOUR_BASTION_PASSWORD"

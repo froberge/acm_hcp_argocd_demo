@@ -1,0 +1,332 @@
+---
+# =============================================================================
+# Playbook: create_hcp_cluster_cli.yaml
+#
+# Creates an OpenShift Hosted Control Plane (HCP) cluster on AWS using the
+# `hcp create cluster aws` CLI, then optionally extracts the live
+# HostedCluster and NodePool resources as clean YAML files into the
+# ArgoCD-watched hcp/ directory.
+#
+# Three phases:
+#   1. Validate + Create  — run `hcp create cluster aws`
+#   2. Wait               — poll until HostedCluster Available and NodePool ready
+#   3. Extract to ArgoCD  — fetch objects from hub, strip status/managedFields,
+#                           write to hcp/ and patch hcp/kustomization.yaml
+#
+# Prerequisites:
+#   - `hcp` binary installed and on $PATH (or set hcp_binary)
+#   - kubeconfig pointing to the ACM hub (management) cluster
+#   - A Kubernetes Secret named `aws_secret_creds` already exists in
+#     `cluster_namespace` on the hub (bundles AWS creds + pull secret)
+#
+# Usage:
+#   # Full run
+#   ansible-playbook create_hcp_cluster_cli.yaml -i inventory.yaml -e @vars/main.yaml#
+# =============================================================================
+
+- name: Create HCP Cluster on AWS via hcp CLI
+  hosts: bastion
+  gather_facts: false
+
+  vars_files:
+    - vars/main.yaml
+
+  tasks:
+
+    - name: Derive infra_id from cluster_name and guid
+      ansible.builtin.set_fact:
+        infra_id: "{{ cluster_name }}-{{ guid }}"
+
+    - name: Show infra_id in use
+      ansible.builtin.debug:
+        msg: "infra_id: {{ infra_id }}"
+
+    # =========================================================================
+    # PHASE 1 — Validate and Create
+    # =========================================================================
+
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - cluster_name is defined and cluster_name | length > 0
+          - cluster_namespace is defined and cluster_namespace | length > 0
+          - infra_id is defined and infra_id | length > 0
+          - aws_region is defined and aws_region | length > 0
+          - aws_zones is defined and aws_zones | length > 0
+          - ocp_release_image is defined and ocp_release_image | length > 0
+          - aws_secret_creds is defined and aws_secret_creds | length > 0
+        fail_msg: "One or more required variables are missing. Review vars/main.yaml."
+        success_msg: "All required variables present."
+
+    - name: Verify hcp binary is available
+      ansible.builtin.command:
+        cmd: which {{ hcp_binary }}
+      register: hcp_which
+      changed_when: false
+      failed_when: hcp_which.rc != 0
+
+    - name: Show hcp binary path
+      ansible.builtin.debug:
+        msg: "hcp binary found at: {{ hcp_which.stdout }}"
+
+    # - name: Verify aws-credentials Secret exists on the hub
+    #   kubernetes.core.k8s_info:
+    #     kubeconfig: "{{ kubeconfig }}"
+    #     kind: Secret
+    #     name: "{{ aws_secret_creds }}"
+    #     namespace: "{{ cluster_namespace }}"
+    #   register: creds_secret
+    #   failed_when: creds_secret.resources | length == 0
+
+    # - name: Secret verified
+    #   ansible.builtin.debug:
+    #     msg: "Secret '{{ aws_secret_creds }}' found in namespace '{{ cluster_namespace }}'."
+
+    # Build the hcp command as a list so shell quoting is not an issue
+    - name: Set hcp create cluster command arguments
+      ansible.builtin.set_fact:
+        hcp_cmd_args: >-
+          {{ hcp_binary }} create cluster aws
+          --name {{ cluster_name }}
+          --infra-id {{ infra_id }}
+          --region {{ aws_region }}
+          --zones {{ aws_zones }}
+          --instance-type {{ node_instance_type }}
+          --root-volume-type {{ node_root_volume_type }}
+          --root-volume-size {{ node_root_volume_size }}
+          --etcd-storage-class {{ etcd_storage_class }}
+          --control-plane-availability-policy {{ control_plane_availability_policy }}
+          --infra-availability-policy {{ infra_availability_policy }}
+          --network-type {{ network_type }}
+          --release-image {{ ocp_release_image }}
+          --node-pool-replicas {{ node_replica_count }}
+          --namespace {{ cluster_namespace }}
+          --secret-creds {{ aws_secret_creds }}
+          --auto-repair
+          --generate-ssh
+
+    # - name: Run hcp create cluster aws
+    #   ansible.builtin.command:
+    #     cmd: "{{ hcp_cmd_args }}"
+    #   environment:
+    #     KUBECONFIG: "{{ kubeconfig }}"
+    #   register: hcp_create_result
+
+    # - name: Show hcp create output
+    #   ansible.builtin.debug:
+    #     msg: "{{ hcp_create_result.stdout_lines }}"
+
+    # =========================================================================
+    # PHASE 2 — Wait for Cluster and NodePool to be Ready
+    # =========================================================================
+
+    - name: Wait for HostedCluster to reach Available condition
+      ansible.builtin.command:
+        cmd: >-
+          oc wait hostedcluster/{{ cluster_name }}
+          -n {{ cluster_namespace }}
+          --for=condition=Available
+          --timeout={{ cluster_ready_timeout }}s
+          --kubeconfig={{ kubeconfig }}
+      register: hc_status
+      changed_when: false
+
+    - name: HostedCluster is available
+      ansible.builtin.debug:
+        msg: "HostedCluster '{{ cluster_name }}' is Available."
+
+    - name: Resolve NodePool name
+      ansible.builtin.set_fact:
+        node_pool_name: "{{ cluster_name }}-{{ aws_zones.split(',')[0] }}"
+
+    - name: Wait for NodePool to reach desired replica count
+      ansible.builtin.command:
+        cmd: >-
+          oc get nodepool/{{ node_pool_name }}
+          -n {{ cluster_namespace }}
+          -o jsonpath={.status.replicas}
+          --kubeconfig={{ kubeconfig }}
+      register: np_status
+      until: (np_status.stdout | default('0') | int) >= (node_replica_count | int)
+      retries: "{{ (nodepool_ready_timeout / 30) | int }}"
+      delay: 30
+      changed_when: false
+
+    - name: NodePool nodes are ready
+      ansible.builtin.debug:
+        msg: "NodePool '{{ node_pool_name }}' has {{ np_status.stdout }} ready node(s)."
+
+    # =========================================================================
+    # PHASE 3 — Extract Resources and Write to hcp/ for ArgoCD
+    # =========================================================================
+
+    - name: Extract HostedCluster and NodePool to hcp/ for ArgoCD
+      block:
+
+        - name: Fetch live HostedCluster from hub
+          ansible.builtin.command:
+            cmd: >-
+              oc get hostedcluster/{{ cluster_name }}
+              -n {{ cluster_namespace }}
+              -o json
+              --kubeconfig={{ kubeconfig }}
+          register: hc_raw
+          changed_when: false
+
+        - name: Build clean HostedCluster manifest
+          ansible.builtin.set_fact:
+            hc_clean: >-
+              {{
+                hc_raw.stdout | from_json
+                | combine({'status': omit}, recursive=true)
+                | combine({
+                    'metadata': (hc_raw.stdout | from_json).metadata
+                    | dict2items
+                    | rejectattr('key', 'in', ['managedFields', 'resourceVersion', 'uid', 'creationTimestamp', 'generation', 'annotations'])
+                    | items2dict
+                  }, recursive=true)
+              }}
+
+        - name: Write hosted_cluster_{{ cluster_name }}.yaml into hcp/
+          ansible.builtin.copy:
+            content: "{{ hc_clean | to_nice_yaml(indent=2) }}"
+            dest: "{{ argocd_hcp_dir }}/hosted_cluster_{{ cluster_name }}.yaml"
+            mode: "0644"
+          delegate_to: localhost
+
+        - name: Fetch live NodePool from hub
+          ansible.builtin.command:
+            cmd: >-
+              oc get nodepool/{{ node_pool_name }}
+              -n {{ cluster_namespace }}
+              -o json
+              --kubeconfig={{ kubeconfig }}
+          register: np_raw
+          changed_when: false
+
+        - name: Build clean NodePool manifest
+          ansible.builtin.set_fact:
+            np_clean: >-
+              {{
+                np_raw.stdout | from_json
+                | combine({'status': omit}, recursive=true)
+                | combine({
+                    'metadata': (np_raw.stdout | from_json).metadata
+                    | dict2items
+                    | rejectattr('key', 'in', ['managedFields', 'resourceVersion', 'uid', 'creationTimestamp', 'generation', 'annotations'])
+                    | items2dict
+                  }, recursive=true)
+              }}
+
+        - name: Write nodePool_{{ cluster_name }}.yaml into hcp/
+          ansible.builtin.copy:
+            content: "{{ np_clean | to_nice_yaml(indent=2) }}"
+            dest: "{{ argocd_hcp_dir }}/nodePool_{{ cluster_name }}.yaml"
+            mode: "0644"
+          delegate_to: localhost
+
+        - name: Read current hcp/kustomization.yaml
+          ansible.builtin.slurp:
+            src: "{{ argocd_hcp_dir }}/kustomization.yaml"
+          register: kustomization_raw
+          delegate_to: localhost
+
+        - name: Parse kustomization content
+          ansible.builtin.set_fact:
+            kustomization: "{{ kustomization_raw.content | b64decode | from_yaml }}"
+
+        - name: Set target resource filenames
+          ansible.builtin.set_fact:
+            hc_filename: "hosted_cluster_{{ cluster_name }}.yaml"
+            np_filename: "nodePool_{{ cluster_name }}.yaml"
+
+        - name: Add HostedCluster filename to kustomization resources if absent
+          ansible.builtin.set_fact:
+            kustomization: >-
+              {{
+                kustomization | combine({
+                  'resources': (kustomization.resources + [hc_filename]) | unique
+                })
+              }}
+
+        - name: Add NodePool filename to kustomization resources if absent
+          ansible.builtin.set_fact:
+            kustomization: >-
+              {{
+                kustomization | combine({
+                  'resources': (kustomization.resources + [np_filename]) | unique
+                })
+              }}
+
+        - name: Write updated hcp/kustomization.yaml
+          ansible.builtin.copy:
+            content: "{{ kustomization | to_nice_yaml(indent=2) }}"
+            dest: "{{ argocd_hcp_dir }}/kustomization.yaml"
+            mode: "0644"
+          delegate_to: localhost
+
+        - name: Show updated kustomization
+          ansible.builtin.debug:
+            msg:
+              - "hcp/kustomization.yaml updated:"
+              - "{{ kustomization | to_nice_yaml(indent=2) }}"
+
+    # =========================================================================
+    # Commit and push hcp/ changes to GitHub
+    # =========================================================================
+
+    - name: Commit and push hcp/ manifests to GitHub
+      block:
+        - name: Stage new/updated files in hcp/
+          ansible.builtin.command:
+            cmd: git add hcp/
+            chdir: "{{ playbook_dir }}/../.."
+          changed_when: false
+
+        - name: Check if there is anything to commit
+          ansible.builtin.command:
+            cmd: git diff --cached --quiet
+            chdir: "{{ playbook_dir }}/../.."
+          register: git_diff
+          changed_when: false
+          failed_when: false
+
+        - name: Commit hcp/ changes
+          ansible.builtin.command:
+            cmd: >-
+              git commit -m
+              "feat: add HCP cluster {{ cluster_name }} manifests"
+            chdir: "{{ playbook_dir }}/../.."
+          when: git_diff.rc != 0
+          changed_when: true
+
+        - name: Push to origin
+          ansible.builtin.command:
+            cmd: git push origin HEAD
+            chdir: "{{ playbook_dir }}/../.."
+          when: git_diff.rc != 0
+          changed_when: true
+      delegate_to: localhost
+
+    # =========================================================================
+    # Summary
+    # =========================================================================
+
+    - name: Cluster provisioning summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "  HCP Cluster Provisioned Successfully"
+          - "=========================================================="
+          - "  Cluster Name   : {{ cluster_name }}"
+          - "  Namespace      : {{ cluster_namespace }}"
+          - "  Infra ID       : {{ infra_id }}"
+          - "  AWS Region     : {{ aws_region }}"
+          - "  AWS Zones      : {{ aws_zones }}"
+          - "  OCP Release    : {{ ocp_release_image }}"
+          - "  NodePool       : {{ node_pool_name }}"
+          - "  Ready Nodes    : {{ np_status.stdout }}"
+          - "=========================================================="
+          - "  Retrieve kubeconfig:"
+          - "    oc extract -n {{ cluster_namespace }} secret/{{ cluster_name }}-admin-kubeconfig --to=-"
+          - "=========================================================="

@@ -1,0 +1,2 @@
+# Ansible Vault — never commit the live encrypted file, only the .example template
+ansible/playbook/vars/vault.yaml

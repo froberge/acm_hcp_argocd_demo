@@ -1,0 +1,88 @@
+---
+# ==============================================================================
+# Variables for: create_hcp_cluster_cli.yaml
+#
+# All values match the reference command:
+#   hcp create cluster aws --name demo --infra-id demo-hl7tn ...
+#
+# Override any variable at runtime with -e <var>=<value>
+# ==============================================================================
+
+# ==============================================================================
+# Bastion Connection
+# ==============================================================================
+# IP address or FQDN of the bastion VM
+bastion_host: bastion.hl7tn.sandbox5342.opentlc.com
+# SSH user on the bastion (e.g. ec2-user, cloud-user, azureuser)
+bastion_user: lab-user
+# Path to the kubeconfig ON THE BASTION pointing to the ACM hub cluster
+kubeconfig: /home/lab-user/.kube/config
+
+# ==============================================================================
+# Cluster Identity
+# ==============================================================================
+cluster_name: demo2
+cluster_namespace: local-cluster
+guid: hl7tn
+
+# ==============================================================================
+# AWS Platform
+# ==============================================================================
+aws_region: us-west-2
+# Comma-separated list of availability zones
+aws_zones: us-west-2a
+
+# ==============================================================================
+# Node Pool
+# ==============================================================================
+node_instance_type: m6a.large
+node_root_volume_type: gp3
+node_root_volume_size: 120
+node_replica_count: 1
+
+# ==============================================================================
+# etcd
+# ==============================================================================
+etcd_storage_class: gp3-csi
+
+# ==============================================================================
+# Availability Policies
+# ==============================================================================
+control_plane_availability_policy: SingleReplica
+infra_availability_policy: SingleReplica
+
+# ==============================================================================
+# Networking
+# ==============================================================================
+network_type: OVNKubernetes
+
+# ==============================================================================
+# OpenShift Release
+# ==============================================================================
+ocp_release_image: quay.io/openshift-release-dev/ocp-release:4.14.3-x86_64
+
+# ==============================================================================
+# Credentials
+# Name of the existing Kubernetes Secret on the hub that bundles AWS credentials
+# and pull secret (created via: hcp create secret aws ...)
+# ==============================================================================
+aws_secret_creds: aws-credentials
+
+
+# ==============================================================================
+# HCP Binary
+# Full path to the hcp binary; assumes it is on $PATH by default
+# ==============================================================================
+hcp_binary: hcp
+
+# Absolute path to the ArgoCD-watched hcp/ directory on the controller.
+# playbook_dir resolves to the directory containing this vars file's playbook.
+argocd_hcp_dir: "{{ playbook_dir }}/../../hcp"
+
+# ==============================================================================
+# Wait / Timeout Settings (seconds)
+# ==============================================================================
+# Time to wait for the HostedCluster to become available
+cluster_ready_timeout: 1800
+# Time to wait for all NodePool nodes to be ready
+nodepool_ready_timeout: 1800
