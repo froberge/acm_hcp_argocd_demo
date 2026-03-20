@@ -10,3 +10,4 @@ resources:
   - gitopscluster.yaml
   - appproject.yaml
   - applicationset.yaml
+  - app-acm-policies.yaml

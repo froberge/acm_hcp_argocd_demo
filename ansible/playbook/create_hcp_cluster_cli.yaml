@@ -105,16 +105,16 @@
           --auto-repair
           --generate-ssh
 
-    # - name: Run hcp create cluster aws
-    #   ansible.builtin.command:
-    #     cmd: "{{ hcp_cmd_args }}"
-    #   environment:
-    #     KUBECONFIG: "{{ kubeconfig }}"
-    #   register: hcp_create_result
+    - name: Run hcp create cluster aws
+      ansible.builtin.command:
+        cmd: "{{ hcp_cmd_args }}"
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: hcp_create_result
 
-    # - name: Show hcp create output
-    #   ansible.builtin.debug:
-    #     msg: "{{ hcp_create_result.stdout_lines }}"
+    - name: Show hcp create output
+      ansible.builtin.debug:
+        msg: "{{ hcp_create_result.stdout_lines }}"
 
     # =========================================================================
     # PHASE 2 — Wait for Cluster and NodePool to be Ready
