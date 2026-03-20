@@ -1,0 +1,49 @@
+apiVersion: hypershift.openshift.io/v1beta1
+kind: NodePool
+metadata:
+  annotations:
+    hypershift.openshift.io/nodePoolCurrentConfig: 20f9ee5a
+    hypershift.openshift.io/nodePoolCurrentConfigVersion: 9ebc8914
+    hypershift.openshift.io/nodePoolPlatformMachineTemplate: demo2-us-west-2a-4833ac4d
+  creationTimestamp: '2026-03-20T12:36:35Z'
+  finalizers:
+  - hypershift.openshift.io/finalizer
+  generation: 1
+  labels:
+    hypershift.openshift.io/auto-created-for-infra: demo2-hl7tn
+  name: demo2-us-west-2a
+  namespace: local-cluster
+  ownerReferences:
+  - apiVersion: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: demo2
+    uid: c5bfd828-8de1-4023-b849-691bfcd7e6e7
+  resourceVersion: '2600668'
+  uid: 2d33a200-ad84-43ad-aeb2-9762ec31fb39
+spec:
+  arch: amd64
+  clusterName: demo2
+  management:
+    autoRepair: true
+    replace:
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0
+      strategy: RollingUpdate
+    upgradeType: Replace
+  nodeDrainTimeout: 0s
+  platform:
+    aws:
+      instanceProfile: demo2-hl7tn-worker
+      instanceType: m6a.large
+      rootVolume:
+        size: 120
+        type: gp3
+      securityGroups:
+      - id: sg-08c1159adc418c3cb
+      subnet:
+        id: subnet-04a64178d48f989f2
+    type: AWS
+  release:
+    image: quay.io/openshift-release-dev/ocp-release:4.14.3-x86_64
+  replicas: 1

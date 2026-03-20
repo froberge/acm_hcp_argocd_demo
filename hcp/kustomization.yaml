@@ -3,3 +3,5 @@ kind: Kustomization
 resources:
 - hosted_cluster.yaml
 - nodePool.yaml
+- hosted_cluster_demo2.yaml
+- nodePool_demo2.yaml
