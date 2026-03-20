@@ -5,6 +5,16 @@ kind: Namespace
 metadata:
   name: acm-policies
 ---
+# Bind the default ManagedClusterSet to this namespace so the Placement below
+# can resolve spoke clusters from that set.
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: default
+  namespace: acm-policies
+spec:
+  clusterSet: default
+---
 # Policy: enforce OpenShift GitOps operator installation on all spoke clusters.
 # ACM propagates the embedded ConfigurationPolicy to every cluster matched by
 # the Placement below and keeps the resources in sync automatically.
