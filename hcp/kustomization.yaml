@@ -5,3 +5,5 @@ resources:
 - nodePool.yaml
 - hosted_cluster_testing.yaml
 - nodePool_testing.yaml
+- hosted_cluster_uat.yaml
+- nodePool_uat.yaml
