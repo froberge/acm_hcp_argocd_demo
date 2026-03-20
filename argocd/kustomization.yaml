@@ -5,6 +5,7 @@ resources:
   - acm-placement-configmap.yaml
   - gitopscluster-rbac.yaml
   - argocd-hypershift-rbac.yaml
+  - argocd-acm-policy-rbac.yaml
   - managedclustersetbinding.yaml
   - placement.yaml
   - gitopscluster.yaml
