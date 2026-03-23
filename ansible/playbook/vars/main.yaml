@@ -21,7 +21,8 @@ kubeconfig: /home/lab-user/.kube/config
 # ==============================================================================
 # Cluster Identity
 # ==============================================================================
-#cluster_name:  As a parameter when lauching the playbook
+# Override at runtime: -e cluster_name=[cluster_name]
+cluster_name: sandbox
 cluster_namespace: local-cluster
 guid: hl7tn
 
@@ -86,3 +87,11 @@ argocd_hcp_dir: "{{ playbook_dir }}/../../hcp"
 cluster_ready_timeout: 1800
 # Time to wait for all NodePool nodes to be ready
 nodepool_ready_timeout: 1800
+
+# ==============================================================================
+# ACM ManagedCluster Labels
+# ==============================================================================
+# Label applied to the ACM ManagedCluster after provisioning.
+# Used by Placements to target policy and operator installation.
+# Override at runtime: -e rhdp_type=secure
+rhdp_type: sandbox

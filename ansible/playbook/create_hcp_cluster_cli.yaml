@@ -20,8 +20,8 @@
 #     `cluster_namespace` on the hub (bundles AWS creds + pull secret)
 #
 # Usage:
-#   # Full run
-#   ansible-playbook create_hcp_cluster_cli.yaml -i inventory.yaml -e @vars/main.yaml#
+#   # Full run.  With variable overriddes at run time. 
+#    ansible-playbook create_hcp_cluster_cli.yaml -i inventory.yaml  -e @vars/vault.yaml -e "cluster_name=[CLUSTER_NAME]" -e "rhdp_type=[LABEL_NAME]"
 # =============================================================================
 
 - name: Create HCP Cluster on AWS via hcp CLI
@@ -155,6 +155,15 @@
     - name: NodePool nodes are ready
       ansible.builtin.debug:
         msg: "NodePool '{{ node_pool_name }}' has {{ np_status.stdout }} ready node(s)."
+
+    - name: Label ManagedCluster with rhdp_type
+      ansible.builtin.command:
+        cmd: >-
+          oc label managedcluster {{ cluster_name }}
+          rhdp_type={{ rhdp_type }}
+          --overwrite
+          --kubeconfig={{ kubeconfig }}
+      changed_when: true
 
     # =========================================================================
     # PHASE 3 — Extract Resources and Write to hcp/ for ArgoCD
