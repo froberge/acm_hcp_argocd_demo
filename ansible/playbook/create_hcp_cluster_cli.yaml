@@ -227,51 +227,6 @@
             mode: "0644"
           delegate_to: localhost
 
-        - name: Read current hcp/kustomization.yaml
-          ansible.builtin.slurp:
-            src: "{{ argocd_hcp_dir }}/kustomization.yaml"
-          register: kustomization_raw
-          delegate_to: localhost
-
-        - name: Parse kustomization content
-          ansible.builtin.set_fact:
-            kustomization: "{{ kustomization_raw.content | b64decode | from_yaml }}"
-
-        - name: Set target resource filenames
-          ansible.builtin.set_fact:
-            hc_filename: "hosted_cluster_{{ cluster_name }}.yaml"
-            np_filename: "nodePool_{{ cluster_name }}.yaml"
-
-        - name: Add HostedCluster filename to kustomization resources if absent
-          ansible.builtin.set_fact:
-            kustomization: >-
-              {{
-                kustomization | combine({
-                  'resources': (kustomization.resources + [hc_filename]) | unique
-                })
-              }}
-
-        - name: Add NodePool filename to kustomization resources if absent
-          ansible.builtin.set_fact:
-            kustomization: >-
-              {{
-                kustomization | combine({
-                  'resources': (kustomization.resources + [np_filename]) | unique
-                })
-              }}
-
-        - name: Write updated hcp/kustomization.yaml
-          ansible.builtin.copy:
-            content: "{{ kustomization | to_nice_yaml(indent=2) }}"
-            dest: "{{ argocd_hcp_dir }}/kustomization.yaml"
-            mode: "0644"
-          delegate_to: localhost
-
-        - name: Show updated kustomization
-          ansible.builtin.debug:
-            msg:
-              - "hcp/kustomization.yaml updated:"
-              - "{{ kustomization | to_nice_yaml(indent=2) }}"
 
     # =========================================================================
     # Commit and push hcp/ changes to GitHub

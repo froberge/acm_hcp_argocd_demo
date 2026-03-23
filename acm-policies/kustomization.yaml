@@ -1,7 +1,0 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-resources:
-  - openshift-gitops-policy.yaml
-  - openshift-pipelines-policy.yaml
-  - network-security-policy.yaml
