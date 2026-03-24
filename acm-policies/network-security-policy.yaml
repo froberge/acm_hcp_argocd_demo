@@ -81,7 +81,7 @@ spec:
             - key: rhdp_type
               operator: In
               values:
-                - secure
+                - dev
 ---
 # PlacementBinding: link the Policy to the Placement so ACM enforces it.
 apiVersion: policy.open-cluster-management.io/v1
