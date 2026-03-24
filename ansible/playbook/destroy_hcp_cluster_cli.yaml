@@ -19,7 +19,7 @@
 #     `cluster_namespace` on the hub
 #
 # Usage:
-#   ansible-playbook destroy_hcp_cluster_cli.yaml -i inventory.yaml -e @vars/vault.yaml -e "cluster_name=[CLUSTER_NAME]"
+#   ansible-playbook ansible/playbook/destroy_hcp_cluster_cli.yaml -i ansible/playbook/inventory.yaml -e @ansible/playbook/vars/vault.yaml -e "cluster_name=[CLUSTER_NAME]"
 # =============================================================================
 
 - name: Destroy HCP Cluster on AWS via hcp CLI
