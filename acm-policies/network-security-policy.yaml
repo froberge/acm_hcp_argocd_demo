@@ -1,12 +1,12 @@
 ---
 # Policy: enforce default-deny NetworkPolicy on all user namespaces of
-# clusters labelled rhdp_type=secure.
+# clusters labelled rhdp_type=dev.
 # ACM's ConfigurationPolicy namespaceSelector creates the NetworkPolicy
 # objects in every non-system namespace it discovers on the spoke cluster.
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: network-security-secure
+  name: network-security-dev
   namespace: acm-policies
   annotations:
     policy.open-cluster-management.io/standards: NIST-CSF
@@ -60,11 +60,11 @@ spec:
                   policyTypes:
                     - Egress
 ---
-# Placement: target only spoke clusters labelled rhdp_type=secure.
+# Placement: target only spoke clusters labelled rhdp_type=dev.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
-  name: network-security-secure-placement
+  name: network-security-dev-placement
   namespace: acm-policies
 spec:
   clusterSets:
@@ -80,19 +80,19 @@ spec:
             - key: rhdp_type
               operator: In
               values:
-                - secure
+                - dev
 ---
 # PlacementBinding: link the Policy to the Placement so ACM enforces it.
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: network-security-secure-binding
+  name: network-security-dev-binding
   namespace: acm-policies
 placementRef:
-  name: network-security-secure-placement
+  name: network-security-dev-placement
   kind: Placement
   apiGroup: cluster.open-cluster-management.io
 subjects:
-  - name: network-security-secure
+  - name: network-security-dev
     kind: Policy
     apiGroup: policy.open-cluster-management.io
