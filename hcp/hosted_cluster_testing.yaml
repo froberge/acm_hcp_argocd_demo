@@ -1,0 +1,83 @@
+apiVersion: hypershift.openshift.io/v1beta1
+kind: HostedCluster
+metadata:
+  name: testing
+  namespace: local-cluster
+spec:
+  autoscaling: {}
+  clusterID: 6111013e-1bff-4c96-a1d2-3e9f7f5e9522
+  configuration: {}
+  controllerAvailabilityPolicy: SingleReplica
+  dns:
+    baseDomain: sandbox5342.opentlc.com
+    privateZoneID: Z08336942MCKQCIGIYXZU
+    publicZoneID: Z01862502ESLGVO54794O
+  etcd:
+    managed:
+      storage:
+        persistentVolume:
+          size: 8Gi
+          storageClassName: gp3-csi
+        type: PersistentVolume
+    managementType: Managed
+  fips: false
+  infraID: testing-hl7tn
+  infrastructureAvailabilityPolicy: SingleReplica
+  issuerURL: https://oidc-storage-hl7tn.s3.us-east-2.amazonaws.com/testing-hl7tn
+  networking:
+    clusterNetwork:
+    - cidr: 10.132.0.0/14
+    machineNetwork:
+    - cidr: 10.0.0.0/16
+    networkType: OVNKubernetes
+    serviceNetwork:
+    - cidr: 172.31.0.0/16
+  olmCatalogPlacement: management
+  platform:
+    aws:
+      cloudProviderConfig:
+        subnet:
+          id: subnet-07158b64bdadcb89c
+        vpc: vpc-0b5fe23037077c3a1
+        zone: us-west-2a
+      endpointAccess: Public
+      region: us-west-2
+      resourceTags:
+      - key: kubernetes.io/cluster/testing-hl7tn
+        value: owned
+      rolesRef:
+        controlPlaneOperatorARN: arn:aws:iam::039612890667:role/testing-hl7tn-control-plane-operator
+        imageRegistryARN: arn:aws:iam::039612890667:role/testing-hl7tn-openshift-image-registry
+        ingressARN: arn:aws:iam::039612890667:role/testing-hl7tn-openshift-ingress
+        kubeCloudControllerARN: arn:aws:iam::039612890667:role/testing-hl7tn-cloud-controller
+        networkARN: arn:aws:iam::039612890667:role/testing-hl7tn-cloud-network-config-controller
+        nodePoolManagementARN: arn:aws:iam::039612890667:role/testing-hl7tn-node-pool
+        storageARN: arn:aws:iam::039612890667:role/testing-hl7tn-aws-ebs-csi-driver-controller
+    type: AWS
+  pullSecret:
+    name: testing-pull-secret
+  release:
+    image: quay.io/openshift-release-dev/ocp-release:4.14.3-x86_64
+  secretEncryption:
+    aescbc:
+      activeKey:
+        name: testing-etcd-encryption-key
+    type: aescbc
+  services:
+  - service: APIServer
+    servicePublishingStrategy:
+      type: LoadBalancer
+  - service: OAuthServer
+    servicePublishingStrategy:
+      type: Route
+  - service: Konnectivity
+    servicePublishingStrategy:
+      type: Route
+  - service: Ignition
+    servicePublishingStrategy:
+      type: Route
+  - service: OVNSbDb
+    servicePublishingStrategy:
+      type: Route
+  sshKey:
+    name: testing-ssh-key
