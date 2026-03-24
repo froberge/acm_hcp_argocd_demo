@@ -18,7 +18,7 @@ spec:
   platform:
     aws:
       instanceProfile: intg-hl7tn-worker
-      instanceType: m6a.large
+      instanceType:  m6a.xlarge
       rootVolume:
         size: 120
         type: gp3
