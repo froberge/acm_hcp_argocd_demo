@@ -87,6 +87,8 @@ argocd_hcp_dir: "{{ playbook_dir }}/../../hcp"
 cluster_ready_timeout: 1800
 # Time to wait for all NodePool nodes to be ready
 nodepool_ready_timeout: 1800
+# Time to wait for the ManagedCluster to be fully deregistered from ACM
+managedcluster_remove_timeout: 600
 
 # ==============================================================================
 # ACM ManagedCluster Labels

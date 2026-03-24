@@ -1,0 +1,180 @@
+---
+# =============================================================================
+# Playbook: destroy_hcp_cluster_cli.yaml
+#
+# Destroys an OpenShift Hosted Control Plane (HCP) cluster on AWS using the
+# `hcp destroy cluster aws` CLI, then removes the corresponding HostedCluster
+# and NodePool manifests from the ArgoCD-watched hcp/ directory.
+#
+# Three phases:
+#   1. Validate + Destroy — run `hcp destroy cluster aws`
+#   2. Wait               — poll until ManagedCluster is deregistered from ACM
+#   3. Cleanup ArgoCD     — delete hcp/ manifests, commit and push so ArgoCD
+#                           prunes the resources it was managing
+#
+# Prerequisites:
+#   - `hcp` binary installed and on $PATH (or set hcp_binary)
+#   - kubeconfig pointing to the ACM hub (management) cluster
+#   - A Kubernetes Secret named `aws_secret_creds` already exists in
+#     `cluster_namespace` on the hub
+#
+# Usage:
+#   ansible-playbook destroy_hcp_cluster_cli.yaml -i inventory.yaml -e @vars/vault.yaml -e "cluster_name=[CLUSTER_NAME]"
+# =============================================================================
+
+- name: Destroy HCP Cluster on AWS via hcp CLI
+  hosts: bastion
+  gather_facts: false
+
+  vars_files:
+    - vars/main.yaml
+
+  tasks:
+
+    - name: Derive infra_id from cluster_name and guid
+      ansible.builtin.set_fact:
+        infra_id: "{{ cluster_name }}-{{ guid }}"
+
+    - name: Show infra_id in use
+      ansible.builtin.debug:
+        msg: "infra_id: {{ infra_id }}"
+
+    # =========================================================================
+    # PHASE 1 — Validate and Destroy
+    # =========================================================================
+
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - cluster_name is defined and cluster_name | length > 0
+          - cluster_namespace is defined and cluster_namespace | length > 0
+          - infra_id is defined and infra_id | length > 0
+          - aws_region is defined and aws_region | length > 0
+          - aws_secret_creds is defined and aws_secret_creds | length > 0
+        fail_msg: "One or more required variables are missing. Review vars/main.yaml."
+        success_msg: "All required variables present."
+
+    - name: Verify hcp binary is available
+      ansible.builtin.command:
+        cmd: which {{ hcp_binary }}
+      register: hcp_which
+      changed_when: false
+      failed_when: hcp_which.rc != 0
+
+    - name: Show hcp binary path
+      ansible.builtin.debug:
+        msg: "hcp binary found at: {{ hcp_which.stdout }}"
+
+    - name: Set hcp destroy cluster command arguments
+      ansible.builtin.set_fact:
+        hcp_destroy_cmd: >-
+          {{ hcp_binary }} destroy cluster aws
+          --name {{ cluster_name }}
+          --infra-id {{ infra_id }}
+          --region {{ aws_region }}
+          --secret-creds {{ aws_secret_creds }}
+          --namespace {{ cluster_namespace }}
+
+    - name: Run hcp destroy cluster aws
+      ansible.builtin.command:
+        cmd: "{{ hcp_destroy_cmd }}"
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: hcp_destroy_result
+
+    - name: Show hcp destroy output
+      ansible.builtin.debug:
+        msg: "{{ hcp_destroy_result.stdout_lines }}"
+
+    # =========================================================================
+    # PHASE 2 — Wait for ManagedCluster to be deregistered from ACM
+    # =========================================================================
+
+    - name: Wait for ManagedCluster to be removed from ACM
+      ansible.builtin.command:
+        cmd: >-
+          oc get managedcluster {{ cluster_name }}
+          --kubeconfig={{ kubeconfig }}
+      register: mc_status
+      until: mc_status.rc != 0
+      retries: "{{ (managedcluster_remove_timeout / 15) | int }}"
+      delay: 15
+      changed_when: false
+      failed_when: false
+
+    - name: ManagedCluster deregistration result
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            "ManagedCluster '" + cluster_name + "' has been removed from ACM."
+            if mc_status.rc != 0
+            else "WARNING: ManagedCluster '" + cluster_name + "' may still exist in ACM — check manually."
+          }}
+
+    # =========================================================================
+    # PHASE 3 — Remove hcp/ manifests and commit for ArgoCD cleanup
+    # =========================================================================
+
+    - name: Remove hcp/ manifests for destroyed cluster
+      block:
+
+        - name: Delete hosted_cluster_{{ cluster_name }}.yaml from hcp/
+          ansible.builtin.file:
+            path: "{{ argocd_hcp_dir }}/hosted_cluster_{{ cluster_name }}.yaml"
+            state: absent
+
+        - name: Delete nodePool_{{ cluster_name }}.yaml from hcp/
+          ansible.builtin.file:
+            path: "{{ argocd_hcp_dir }}/nodePool_{{ cluster_name }}.yaml"
+            state: absent
+
+        - name: Stage removed files in hcp/
+          ansible.builtin.command:
+            cmd: git add hcp/
+            chdir: "{{ playbook_dir }}/../.."
+          changed_when: false
+
+        - name: Check if there is anything to commit
+          ansible.builtin.command:
+            cmd: git diff --cached --quiet
+            chdir: "{{ playbook_dir }}/../.."
+          register: git_diff
+          changed_when: false
+          failed_when: false
+
+        - name: Commit hcp/ removal
+          ansible.builtin.command:
+            cmd: >-
+              git commit -m
+              "chore: remove HCP cluster {{ cluster_name }} manifests"
+            chdir: "{{ playbook_dir }}/../.."
+          when: git_diff.rc != 0
+          changed_when: true
+
+        - name: Push to origin
+          ansible.builtin.command:
+            cmd: git push origin HEAD
+            chdir: "{{ playbook_dir }}/../.."
+          when: git_diff.rc != 0
+          changed_when: true
+
+      delegate_to: localhost
+
+    # =========================================================================
+    # Summary
+    # =========================================================================
+
+    - name: Cluster destruction summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "  HCP Cluster Destroyed Successfully"
+          - "=========================================================="
+          - "  Cluster Name   : {{ cluster_name }}"
+          - "  Namespace      : {{ cluster_namespace }}"
+          - "  Infra ID       : {{ infra_id }}"
+          - "  AWS Region     : {{ aws_region }}"
+          - "=========================================================="
+          - "  ArgoCD will prune the HostedCluster and NodePool"
+          - "  resources on its next sync cycle."
+          - "=========================================================="
