@@ -24,6 +24,7 @@ spec:
         spec:
           remediationAction: enforce
           severity: high
+          pruneObjectBehavior: DeleteIfCreated
           # Apply to all namespaces except core system ones.
           # Glob patterns supported; each entry is ANDed with the include list.
           namespaceSelector:
