@@ -61,7 +61,7 @@ spec:
                   policyTypes:
                     - Egress
 ---
-# Placement: target only spoke clusters labelled rhdp_type=secursandbox.
+# Placement: target only spoke clusters labelled rhdp_type=sandbox.
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
