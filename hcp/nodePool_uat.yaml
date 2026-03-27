@@ -1,0 +1,32 @@
+apiVersion: hypershift.openshift.io/v1beta1
+kind: NodePool
+metadata:
+  name: uat-us-west-2a
+  namespace: local-cluster
+spec:
+  arch: amd64
+  clusterName: uat
+  management:
+    autoRepair: true
+    replace:
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0
+      strategy: RollingUpdate
+    upgradeType: Replace
+  nodeDrainTimeout: 0s
+  platform:
+    aws:
+      instanceProfile: uat-hl7tn-worker
+      instanceType: m6a.xlarge
+      rootVolume:
+        size: 120
+        type: gp3
+      securityGroups:
+      - id: sg-0808726fc0289e86d
+      subnet:
+        id: subnet-0580d327765648dc2
+    type: AWS
+  release:
+    image: quay.io/openshift-release-dev/ocp-release:4.14.3-x86_64
+  replicas: 1
