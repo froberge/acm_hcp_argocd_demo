@@ -1,48 +1,28 @@
 ---
-# ── SLO Observability Policy ──────────────────────────────────────────────────
+# ── Policy 1: slo-infrastructure ─────────────────────────────────────────────
 #
-# This ACM Policy is split into two logical concerns:
+# ENFORCE on ALL spoke clusters.
+# Enables OpenShift User Workload Monitoring (prerequisite for PrometheusRule
+# objects in application namespaces) and ensures the coffeeshop namespace
+# exists before Argo CD deploys SLO rules into it.
 #
-#   enforce ConfigurationPolicies:
-#     1. Enables OpenShift User Workload Monitoring on every spoke cluster so
-#        that PrometheusRule objects in application namespaces are picked up
-#        by the in-cluster Prometheus instance.
-#     2. Ensures the coffeeshop namespace exists before Argo CD deploys the
-#        SLO PrometheusRule objects into it.
-#
-#   inform ConfigurationPolicy:
-#     3. Checks that Argo CD has successfully deployed the SLO PrometheusRules.
-#        Never creates them (that is Argo CD's job) — only raises a compliance
-#        violation in the ACM console when they are missing.
-#
-# IMPORTANT: the remediationAction field is intentionally omitted at the Policy
-# level.  When absent, ACM honours each child ConfigurationPolicy's own
-# remediationAction.  If set at the Policy level it would override every child,
-# causing the inform-only verify policy to also try to CREATE the rules — which
-# fails because only metadata (no spec) is provided.
-#
-# Target: all spoke clusters (local-cluster != "true").
+# Placement: every spoke (local-cluster != "true").
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
-  name: slo-observability
+  name: slo-infrastructure
   namespace: acm-policies
   annotations:
     policy.open-cluster-management.io/standards: NIST-CSF
     policy.open-cluster-management.io/categories: DE.CM Security Continuous Monitoring
     policy.open-cluster-management.io/controls: DE.CM-1 Network Monitoring
 spec:
-  # remediationAction is deliberately absent here so that each embedded
-  # ConfigurationPolicy controls its own action (enforce vs inform).
+  remediationAction: enforce
   disabled: false
   policy-templates:
 
-    # ── 1. Enable user workload monitoring (enforce) ──────────────────────────
-    # Sets enableUserWorkload: true in the cluster-monitoring-config ConfigMap
-    # inside openshift-monitoring.  This causes the OpenShift monitoring stack
-    # to deploy a second Prometheus instance dedicated to user namespaces and
-    # to honour PrometheusRule objects created there.
+    # Enable the user workload monitoring Prometheus instance on each spoke.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -63,9 +43,8 @@ spec:
                   config.yaml: |
                     enableUserWorkload: true
 
-    # ── 2. Create the coffeeshop namespace (enforce) ──────────────────────────
-    # Ensures the target namespace exists before SLO PrometheusRules are
-    # deployed by Argo CD.
+    # Ensure the coffeeshop namespace exists before the SLO PrometheusRules
+    # are deployed by Argo CD.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -83,13 +62,67 @@ spec:
                   name: coffeeshop
                   labels:
                     app.kubernetes.io/part-of: coffeeshop
+---
+# Placement: all spoke clusters.
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: slo-infrastructure-placement
+  namespace: acm-policies
+spec:
+  clusterSets:
+    - default
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: local-cluster
+              operator: NotIn
+              values:
+                - "true"
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: slo-infrastructure-binding
+  namespace: acm-policies
+placementRef:
+  name: slo-infrastructure-placement
+  kind: Placement
+  apiGroup: cluster.open-cluster-management.io
+subjects:
+  - name: slo-infrastructure
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
+---
+# ── Policy 2: slo-verify-coffeeshop ──────────────────────────────────────────
+#
+# INFORM on the coffeeshop cluster only.
+# Checks that Argo CD has successfully deployed the two SLO PrometheusRule
+# objects.  It never creates them — that is Argo CD's job.  A NonCompliant
+# status here means the Argo CD sync for app-slo-coffeeshop has not yet run
+# or has failed.
+#
+# Placement: clusters whose ACM name label equals "coffeeshop".
+# The name label is set automatically by ACM when the ManagedCluster is
+# registered; its value matches the hosted cluster name.
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: slo-verify-coffeeshop
+  namespace: acm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST-CSF
+    policy.open-cluster-management.io/categories: DE.CM Security Continuous Monitoring
+    policy.open-cluster-management.io/controls: DE.CM-1 Network Monitoring
+spec:
+  remediationAction: inform
+  disabled: false
+  policy-templates:
 
-    # ── 3. Verify SLO PrometheusRules exist (inform only) ────────────────────
-    # remediationAction: inform — ACM will NEVER attempt to create these objects.
-    # It only reports NonCompliant in the ACM console when they are absent,
-    # which signals a failed or pending Argo CD sync.
-    # Only metadata is specified here intentionally: we are checking for the
-    # existence of the resource, not enforcing its content.
+    # Verify the availability SLO rule exists (Argo CD should have created it).
+    # Only metadata is matched — we check for existence, not content.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
@@ -114,11 +147,11 @@ spec:
                   name: coffeeshop-slo-latency
                   namespace: coffeeshop
 ---
-# Placement: target all spoke clusters (i.e. not the hub).
+# Placement: coffeeshop cluster only (matched by the managed cluster name label).
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
-  name: slo-observability-placement
+  name: slo-verify-coffeeshop-placement
   namespace: acm-policies
 spec:
   clusterSets:
@@ -126,23 +159,19 @@ spec:
   predicates:
     - requiredClusterSelector:
         labelSelector:
-          matchExpressions:
-            - key: local-cluster
-              operator: NotIn
-              values:
-                - "true"
+          matchLabels:
+            name: coffeeshop
 ---
-# PlacementBinding: link the Policy to the Placement.
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: slo-observability-binding
+  name: slo-verify-coffeeshop-binding
   namespace: acm-policies
 placementRef:
-  name: slo-observability-placement
+  name: slo-verify-coffeeshop-placement
   kind: Placement
   apiGroup: cluster.open-cluster-management.io
 subjects:
-  - name: slo-observability
+  - name: slo-verify-coffeeshop
     kind: Policy
     apiGroup: policy.open-cluster-management.io

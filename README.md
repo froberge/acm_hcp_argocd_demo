@@ -53,7 +53,8 @@ acm_hcp_argocd_demo/
 ├── acm-policies/                           # ACM Policies applied to spoke clusters
 │   ├── openshift-gitops-policy.yaml        # Installs OpenShift GitOps operator on spokes
 │   ├── openshift-pipelines-policy.yaml     # Installs OpenShift Pipelines operator on spokes
-│   └── slo-observability-policy.yaml       # Enables user workload monitoring + SLO compliance checks
+│   └── slo-observability-policy.yaml       # Policy 1 (enforce, all spokes): user workload monitoring + namespace
+│                                           # Policy 2 (inform, coffeeshop only): verifies SLO PrometheusRules exist
 ├── ansible/
 │   └── playbook/
 │       ├── create_hcp_cluster_cli.yaml     # Playbook: provision HCP cluster via hcp CLI
@@ -290,12 +291,21 @@ Error rate 0.1 %  ──┘   1.0 × budget (warning)   → ticket within 6 hour
 
 #### Step 1 — Enable user workload monitoring via ACM Policy
 
-The `slo-observability-policy.yaml` in `acm-policies/` is already picked up by the `acm-policies` Argo CD Application. Once synced, ACM enforces the policy on every spoke cluster:
+`slo-observability-policy.yaml` in `acm-policies/` is already picked up by the `acm-policies` Argo CD Application. It defines **two separate policies** with different placements to avoid false violations:
+
+| Policy | Placement | Action | Purpose |
+|---|---|---|---|
+| `slo-infrastructure` | all spokes | enforce | Enables user workload monitoring + creates the `coffeeshop` namespace |
+| `slo-verify-coffeeshop` | `coffeeshop` cluster only | inform | Reports NonCompliant if Argo CD has not yet deployed the SLO rules |
+
+The verify policy is scoped to the coffeeshop cluster only because the `PrometheusRule` objects are only deployed there — putting it on all spokes would produce a permanent violation on clusters that do not run the coffeeshop workload.
 
 ```bash
-# Verify the policy was synced and is compliant on the coffeeshop cluster
-oc get policy slo-observability -n acm-policies
-oc get policy.open-cluster-management.io/coffeeshop.slo-observability -n coffeeshop
+# Verify both policies are synced
+oc get policy slo-infrastructure slo-verify-coffeeshop -n acm-policies
+
+# Check enforcement status on all clusters
+oc get policy.open-cluster-management.io -A | grep slo
 ```
 
 #### Step 2 — Deploy the SLO PrometheusRules via Argo CD
@@ -545,8 +555,11 @@ oc apply -f argocd/app-slo-coffeeshop.yaml
 # Check SLO Application sync status
 oc get application slo-coffeeshop -n openshift-gitops
 
-# Check policy compliance for the SLO observability policy across all clusters
-oc get policy slo-observability -n acm-policies
+# Check both SLO policies
+oc get policy slo-infrastructure slo-verify-coffeeshop -n acm-policies
+
+# Check propagated policy status across all clusters
+oc get policy.open-cluster-management.io -A | grep slo
 
 # Verify PrometheusRules exist on the coffeeshop spoke cluster
 # (requires KUBECONFIG pointing to the coffeeshop cluster)
