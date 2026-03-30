@@ -1,23 +1,27 @@
 ---
 # ── SLO Observability Policy ──────────────────────────────────────────────────
 #
-# This ACM Policy does two things:
+# This ACM Policy is split into two logical concerns:
 #
-#   1. Enables OpenShift User Workload Monitoring on every spoke cluster so
-#      that PrometheusRule objects in application namespaces are picked up
-#      by the in-cluster Prometheus instance.
+#   enforce ConfigurationPolicies:
+#     1. Enables OpenShift User Workload Monitoring on every spoke cluster so
+#        that PrometheusRule objects in application namespaces are picked up
+#        by the in-cluster Prometheus instance.
+#     2. Ensures the coffeeshop namespace exists before Argo CD deploys the
+#        SLO PrometheusRule objects into it.
 #
-#   2. Enforces the ACM Observability add-on label on each spoke cluster so
-#      that the MultiClusterObservability operator (if installed on the hub)
-#      automatically deploys the metrics collection agent and forwards data
-#      to the central Thanos instance.
+#   inform ConfigurationPolicy:
+#     3. Checks that Argo CD has successfully deployed the SLO PrometheusRules.
+#        Never creates them (that is Argo CD's job) — only raises a compliance
+#        violation in the ACM console when they are missing.
 #
-# Together these two steps allow SLI recording rules defined in the `slo/`
-# directory to be scraped locally and aggregated centrally for cross-cluster
-# SLO dashboards.
+# IMPORTANT: the remediationAction field is intentionally omitted at the Policy
+# level.  When absent, ACM honours each child ConfigurationPolicy's own
+# remediationAction.  If set at the Policy level it would override every child,
+# causing the inform-only verify policy to also try to CREATE the rules — which
+# fails because only metadata (no spec) is provided.
 #
 # Target: all spoke clusters (local-cluster != "true").
-# Remediation: enforce — ACM will re-apply any drift automatically.
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
@@ -29,11 +33,12 @@ metadata:
     policy.open-cluster-management.io/categories: DE.CM Security Continuous Monitoring
     policy.open-cluster-management.io/controls: DE.CM-1 Network Monitoring
 spec:
-  remediationAction: enforce
+  # remediationAction is deliberately absent here so that each embedded
+  # ConfigurationPolicy controls its own action (enforce vs inform).
   disabled: false
   policy-templates:
 
-    # ── 1. Enable user workload monitoring ─────────────────────────────────────
+    # ── 1. Enable user workload monitoring (enforce) ──────────────────────────
     # Sets enableUserWorkload: true in the cluster-monitoring-config ConfigMap
     # inside openshift-monitoring.  This causes the OpenShift monitoring stack
     # to deploy a second Prometheus instance dedicated to user namespaces and
@@ -58,7 +63,7 @@ spec:
                   config.yaml: |
                     enableUserWorkload: true
 
-    # ── 2. Create the coffeeshop namespace ────────────────────────────────────
+    # ── 2. Create the coffeeshop namespace (enforce) ──────────────────────────
     # Ensures the target namespace exists before SLO PrometheusRules are
     # deployed by Argo CD.
     - objectDefinition:
@@ -80,10 +85,11 @@ spec:
                     app.kubernetes.io/part-of: coffeeshop
 
     # ── 3. Verify SLO PrometheusRules exist (inform only) ────────────────────
-    # This ConfigurationPolicy has remediationAction: inform so it does not
-    # create the rules (that is Argo CD's job) but it DOES raise a compliance
-    # violation in the ACM console if the rules are missing — useful to detect
-    # drift or a failed GitOps sync.
+    # remediationAction: inform — ACM will NEVER attempt to create these objects.
+    # It only reports NonCompliant in the ACM console when they are absent,
+    # which signals a failed or pending Argo CD sync.
+    # Only metadata is specified here intentionally: we are checking for the
+    # existence of the resource, not enforcing its content.
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
         kind: ConfigurationPolicy
