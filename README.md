@@ -85,6 +85,8 @@ acm_hcp_argocd_demo/
 │   ├── hosted_cluster_coffeeshop.yaml      # HostedCluster: coffeeshop
 │   ├── nodePool.yaml                       # NodePool: development
 │   └── nodePool_coffeeshop.yaml            # NodePool: coffeeshop
+├── docs/
+│   └── demo-slo-ops.md                     # Step-by-step SLI/SLO Ops demo script with talking points
 └── slo/                                    # SLI/SLO definitions — deployed to spoke clusters
     ├── kustomization.yaml                  # Kustomize entry point
     ├── namespace.yaml                      # coffeeshop application namespace
@@ -178,6 +180,8 @@ This file is not automatically synced by Argo CD; it is applied manually for dem
 ---
 
 ## SLI / SLO Ops
+
+> For a full step-by-step demo script with talking points, PromQL queries, and a simulated incident walkthrough, see [docs/demo-slo-ops.md](docs/demo-slo-ops.md).
 
 ### What are SLIs and SLOs?
 
