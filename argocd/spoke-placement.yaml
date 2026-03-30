@@ -9,6 +9,8 @@ metadata:
   name: spoke-placement
   namespace: openshift-gitops
 spec:
+  clusterSets:
+    - default
   predicates:
     - requiredClusterSelector:
         labelSelector:
