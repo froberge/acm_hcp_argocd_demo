@@ -1,0 +1,181 @@
+---
+# SLI/SLO — Availability
+#
+# SLI definition:
+#   The proportion of HTTP requests to the coffeeshop service that are
+#   considered "good" (HTTP status code is not 5xx).
+#
+# SLO target: 99.9 % of requests succeed over a 28-day rolling window.
+# Error budget: 0.1 % → ~40 minutes of permitted errors per 28 days.
+#
+# Multi-burn-rate alerting windows (Google SRE book, chapter 5):
+#
+#   Severity   | Burn multiplier | Short window | Long window | Budget consumed
+#   -----------|-----------------|--------------|-------------|----------------
+#   critical   | 14.4 ×          | 5 m          | 1 h         | 2 % in 1 h
+#   critical   |  6.0 ×          | 30 m         | 6 h         | 5 % in 6 h
+#   warning    |  1.0 ×          | 6 h          | 3 d         | 10 % in 3 d
+#
+# Prerequisites:
+#   - OpenShift user workload monitoring enabled (cluster-monitoring-config
+#     ConfigMap with enableUserWorkload: true)
+#   - The coffeeshop application exposes Prometheus metrics on a /metrics
+#     endpoint scraped by a ServiceMonitor in the same namespace.
+#   - The application uses the standard http_requests_total counter with
+#     labels: {job="coffeeshop", code="<HTTP status>"}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: coffeeshop-slo-availability
+  namespace: coffeeshop
+  labels:
+    app.kubernetes.io/name: coffeeshop
+    app.kubernetes.io/component: slo
+    role: alert-rules
+spec:
+  groups:
+
+    # ── Recording rules ──────────────────────────────────────────────────────
+    # These compute the error ratio over multiple windows so that alerting
+    # expressions stay readable and evaluation is consistent.
+
+    - name: coffeeshop.slo.availability:recordings
+      interval: 30s
+      rules:
+
+        # Fraction of failed requests over a 5-minute window
+        - record: job:coffeeshop_http_errors:ratio_rate5m
+          expr: |
+            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="coffeeshop"}[5m]))
+
+        # Fraction of failed requests over a 30-minute window
+        - record: job:coffeeshop_http_errors:ratio_rate30m
+          expr: |
+            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[30m]))
+            /
+            sum(rate(http_requests_total{job="coffeeshop"}[30m]))
+
+        # Fraction of failed requests over a 1-hour window
+        - record: job:coffeeshop_http_errors:ratio_rate1h
+          expr: |
+            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{job="coffeeshop"}[1h]))
+
+        # Fraction of failed requests over a 6-hour window
+        - record: job:coffeeshop_http_errors:ratio_rate6h
+          expr: |
+            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[6h]))
+            /
+            sum(rate(http_requests_total{job="coffeeshop"}[6h]))
+
+        # Fraction of failed requests over a 3-day window
+        - record: job:coffeeshop_http_errors:ratio_rate3d
+          expr: |
+            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[3d]))
+            /
+            sum(rate(http_requests_total{job="coffeeshop"}[3d]))
+
+        # Remaining error budget as a fraction (1 = full budget, 0 = exhausted)
+        # SLO objective = 0.999 → error budget threshold = 0.001
+        - record: job:coffeeshop_availability_slo:error_budget_remaining
+          expr: |
+            1 - (
+              sum(increase(http_requests_total{job="coffeeshop", code=~"5.."}[28d]))
+              /
+              sum(increase(http_requests_total{job="coffeeshop"}[28d]))
+            ) / 0.001
+
+    # ── Alerting rules ───────────────────────────────────────────────────────
+
+    - name: coffeeshop.slo.availability:alerts
+      rules:
+
+        # ── Critical: fast burn (page now) ───────────────────────────────────
+        # The service is burning through its error budget at 14.4× the
+        # sustainable rate.  If sustained it will exhaust 2 % of the monthly
+        # budget in just 1 hour.  Requires both the 5-minute and 1-hour
+        # windows to be elevated to avoid false positives from transient spikes.
+        - alert: CoffeeshopAvailabilityCriticalFastBurn
+          expr: |
+            (
+              job:coffeeshop_http_errors:ratio_rate1h  > (14.4 * 0.001)
+              and
+              job:coffeeshop_http_errors:ratio_rate5m  > (14.4 * 0.001)
+            )
+          for: 2m
+          labels:
+            severity: critical
+            slo: availability
+            service: coffeeshop
+          annotations:
+            summary: "Coffeeshop availability SLO — critical fast burn"
+            description: >-
+              The error rate is {{ $value | humanizePercentage }} over the last
+              hour (budget threshold: 1.44 %).  At this rate 2 % of the 28-day
+              error budget will be consumed within 1 hour.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-availability.md"
+
+        # ── Critical: slow burn (page soon) ──────────────────────────────────
+        # The service is burning through its error budget at 6× the sustainable
+        # rate.  If sustained it will exhaust 5 % of the monthly budget in 6 h.
+        - alert: CoffeeshopAvailabilityCriticalSlowBurn
+          expr: |
+            (
+              job:coffeeshop_http_errors:ratio_rate6h  > (6 * 0.001)
+              and
+              job:coffeeshop_http_errors:ratio_rate30m > (6 * 0.001)
+            )
+          for: 15m
+          labels:
+            severity: critical
+            slo: availability
+            service: coffeeshop
+          annotations:
+            summary: "Coffeeshop availability SLO — critical slow burn"
+            description: >-
+              The error rate is {{ $value | humanizePercentage }} over the last
+              6 hours (budget threshold: 0.6 %).  At this rate 5 % of the 28-day
+              error budget will be consumed within 6 hours.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-availability.md"
+
+        # ── Warning: very slow burn (create ticket) ───────────────────────────
+        # The service is burning through its error budget at the sustainable
+        # rate or slightly above.  No immediate action needed but this should
+        # be tracked.
+        - alert: CoffeeshopAvailabilityWarningSlowBurn
+          expr: |
+            (
+              job:coffeeshop_http_errors:ratio_rate3d > (1 * 0.001)
+              and
+              job:coffeeshop_http_errors:ratio_rate6h > (1 * 0.001)
+            )
+          for: 1h
+          labels:
+            severity: warning
+            slo: availability
+            service: coffeeshop
+          annotations:
+            summary: "Coffeeshop availability SLO — warning slow burn"
+            description: >-
+              The error rate is {{ $value | humanizePercentage }} over the last
+              3 days (budget threshold: 0.1 %).  At this rate the error budget
+              will be exhausted within the 28-day window.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-availability.md"
+
+        # ── Info: error budget low ────────────────────────────────────────────
+        - alert: CoffeeshopAvailabilityErrorBudgetLow
+          expr: job:coffeeshop_availability_slo:error_budget_remaining < 0.25
+          for: 5m
+          labels:
+            severity: info
+            slo: availability
+            service: coffeeshop
+          annotations:
+            summary: "Coffeeshop availability SLO — error budget below 25 %"
+            description: >-
+              Only {{ $value | humanizePercentage }} of the 28-day error budget
+              remains.  Review recent incidents and consider a freeze on
+              risky changes.

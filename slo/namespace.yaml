@@ -1,0 +1,11 @@
+---
+# Application namespace where the coffeeshop workload runs.
+# User workload monitoring must be enabled on the cluster so that
+# PrometheusRule objects in this namespace are picked up by the
+# in-cluster Prometheus instance.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coffeeshop
+  labels:
+    app.kubernetes.io/part-of: coffeeshop

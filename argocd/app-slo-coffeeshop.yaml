@@ -1,0 +1,43 @@
+---
+# Argo CD Application — SLO definitions for the coffeeshop cluster
+#
+# This Application deploys the PrometheusRule objects defined in `slo/` to the
+# coffeeshop spoke cluster.  It targets the coffeeshop cluster by referencing
+# the Argo CD cluster secret that ACM registers when the hosted cluster becomes
+# a ManagedCluster and the GitOps operator is deployed on it.
+#
+# The destination server URL is the API server of the coffeeshop HCP cluster.
+# Replace the placeholder below with the actual URL once the cluster is
+# provisioned (visible via: oc get hostedcluster coffeeshop -n local-cluster
+# -o jsonpath='{.status.controlPlaneEndpoint.host}').
+#
+# Alternatively, if the cluster is registered with Argo CD by name (via the
+# ACM GitOpsCluster integration), you can use:
+#   destination:
+#     name: coffeeshop
+#     namespace: coffeeshop
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: slo-coffeeshop
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/component: slo
+    app.kubernetes.io/part-of: coffeeshop
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/froberge/acm_hcp_argocd_demo
+    targetRevision: main
+    path: slo
+  destination:
+    # Use the cluster name registered by ACM in Argo CD, or replace with the
+    # coffeeshop API server URL (https://<api-host>:6443).
+    name: coffeeshop
+    namespace: coffeeshop
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

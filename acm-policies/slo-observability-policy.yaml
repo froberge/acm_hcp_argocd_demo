@@ -1,0 +1,142 @@
+---
+# ── SLO Observability Policy ──────────────────────────────────────────────────
+#
+# This ACM Policy does two things:
+#
+#   1. Enables OpenShift User Workload Monitoring on every spoke cluster so
+#      that PrometheusRule objects in application namespaces are picked up
+#      by the in-cluster Prometheus instance.
+#
+#   2. Enforces the ACM Observability add-on label on each spoke cluster so
+#      that the MultiClusterObservability operator (if installed on the hub)
+#      automatically deploys the metrics collection agent and forwards data
+#      to the central Thanos instance.
+#
+# Together these two steps allow SLI recording rules defined in the `slo/`
+# directory to be scraped locally and aggregated centrally for cross-cluster
+# SLO dashboards.
+#
+# Target: all spoke clusters (local-cluster != "true").
+# Remediation: enforce — ACM will re-apply any drift automatically.
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: slo-observability
+  namespace: acm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST-CSF
+    policy.open-cluster-management.io/categories: DE.CM Security Continuous Monitoring
+    policy.open-cluster-management.io/controls: DE.CM-1 Network Monitoring
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+
+    # ── 1. Enable user workload monitoring ─────────────────────────────────────
+    # Sets enableUserWorkload: true in the cluster-monitoring-config ConfigMap
+    # inside openshift-monitoring.  This causes the OpenShift monitoring stack
+    # to deploy a second Prometheus instance dedicated to user namespaces and
+    # to honour PrometheusRule objects created there.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: enable-user-workload-monitoring
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: cluster-monitoring-config
+                  namespace: openshift-monitoring
+                data:
+                  config.yaml: |
+                    enableUserWorkload: true
+
+    # ── 2. Create the coffeeshop namespace ────────────────────────────────────
+    # Ensures the target namespace exists before SLO PrometheusRules are
+    # deployed by Argo CD.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: ensure-coffeeshop-namespace
+        spec:
+          remediationAction: enforce
+          severity: low
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: coffeeshop
+                  labels:
+                    app.kubernetes.io/part-of: coffeeshop
+
+    # ── 3. Verify SLO PrometheusRules exist (inform only) ────────────────────
+    # This ConfigurationPolicy has remediationAction: inform so it does not
+    # create the rules (that is Argo CD's job) but it DOES raise a compliance
+    # violation in the ACM console if the rules are missing — useful to detect
+    # drift or a failed GitOps sync.
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: verify-slo-prometheusrules
+        spec:
+          remediationAction: inform
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: monitoring.coreos.com/v1
+                kind: PrometheusRule
+                metadata:
+                  name: coffeeshop-slo-availability
+                  namespace: coffeeshop
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: monitoring.coreos.com/v1
+                kind: PrometheusRule
+                metadata:
+                  name: coffeeshop-slo-latency
+                  namespace: coffeeshop
+---
+# Placement: target all spoke clusters (i.e. not the hub).
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: slo-observability-placement
+  namespace: acm-policies
+spec:
+  clusterSets:
+    - default
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: local-cluster
+              operator: NotIn
+              values:
+                - "true"
+---
+# PlacementBinding: link the Policy to the Placement.
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: slo-observability-binding
+  namespace: acm-policies
+placementRef:
+  name: slo-observability-placement
+  kind: Placement
+  apiGroup: cluster.open-cluster-management.io
+subjects:
+  - name: slo-observability
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io

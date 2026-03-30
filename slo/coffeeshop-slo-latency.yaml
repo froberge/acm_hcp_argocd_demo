@@ -1,0 +1,172 @@
+---
+# SLI/SLO — Latency
+#
+# SLI definition:
+#   The proportion of HTTP requests to the coffeeshop service that are
+#   served within 500 milliseconds (the latency threshold).
+#   This is a "good-event" SLI: a request counts as good if its duration
+#   falls in the 0–500 ms histogram bucket.
+#
+# SLO target: 95 % of requests are served within 500 ms over a 28-day
+#             rolling window.
+# Error budget: 5 % of requests may exceed 500 ms.
+#
+# Multi-burn-rate alerting uses the same window pairs as the availability SLO.
+# The error budget fraction is now 0.05 (5 %) instead of 0.001 (0.1 %).
+#
+#   Severity   | Burn multiplier | Short window | Long window
+#   -----------|-----------------|--------------|------------
+#   critical   | 14.4 ×          | 5 m          | 1 h
+#   critical   |  6.0 ×          | 30 m         | 6 h
+#   warning    |  1.0 ×          | 6 h          | 3 d
+#
+# Prerequisites: same as coffeeshop-slo-availability.yaml.
+# The application must expose the standard histogram:
+#   http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: coffeeshop-slo-latency
+  namespace: coffeeshop
+  labels:
+    app.kubernetes.io/name: coffeeshop
+    app.kubernetes.io/component: slo
+    role: alert-rules
+spec:
+  groups:
+
+    # ── Recording rules ──────────────────────────────────────────────────────
+
+    - name: coffeeshop.slo.latency:recordings
+      interval: 30s
+      rules:
+
+        # Fraction of requests that exceeded 500 ms over a 5-minute window
+        # (1 - good_ratio = bad_ratio, equivalent to error ratio)
+        - record: job:coffeeshop_latency_errors:ratio_rate5m
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[5m]))
+              /
+              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[5m]))
+            )
+
+        - record: job:coffeeshop_latency_errors:ratio_rate30m
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[30m]))
+              /
+              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[30m]))
+            )
+
+        - record: job:coffeeshop_latency_errors:ratio_rate1h
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[1h]))
+              /
+              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[1h]))
+            )
+
+        - record: job:coffeeshop_latency_errors:ratio_rate6h
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[6h]))
+              /
+              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[6h]))
+            )
+
+        - record: job:coffeeshop_latency_errors:ratio_rate3d
+          expr: |
+            1 - (
+              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[3d]))
+              /
+              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[3d]))
+            )
+
+        # p95 latency over a 5-minute window (useful for dashboards)
+        - record: job:coffeeshop_latency_p95:rate5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (
+                rate(http_request_duration_seconds_bucket{job="coffeeshop"}[5m])
+              )
+            )
+
+        # Remaining latency error budget as a fraction
+        - record: job:coffeeshop_latency_slo:error_budget_remaining
+          expr: |
+            1 - (
+              1 - (
+                sum(increase(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[28d]))
+                /
+                sum(increase(http_request_duration_seconds_count{job="coffeeshop"}[28d]))
+              )
+            ) / 0.05
+
+    # ── Alerting rules ───────────────────────────────────────────────────────
+
+    - name: coffeeshop.slo.latency:alerts
+      rules:
+
+        # ── Critical: fast burn ───────────────────────────────────────────────
+        - alert: CoffeeshopLatencyCriticalFastBurn
+          expr: |
+            (
+              job:coffeeshop_latency_errors:ratio_rate1h  > (14.4 * 0.05)
+              and
+              job:coffeeshop_latency_errors:ratio_rate5m  > (14.4 * 0.05)
+            )
+          for: 2m
+          labels:
+            severity: critical
+            slo: latency
+            service: coffeeshop
+          annotations:
+            summary: "Coffeeshop latency SLO — critical fast burn"
+            description: >-
+              {{ $value | humanizePercentage }} of requests exceeded 500 ms
+              over the last hour (budget threshold: 72 %).  At this rate
+              the latency error budget will be exhausted in less than 1 hour.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-latency.md"
+
+        # ── Critical: slow burn ───────────────────────────────────────────────
+        - alert: CoffeeshopLatencyCriticalSlowBurn
+          expr: |
+            (
+              job:coffeeshop_latency_errors:ratio_rate6h  > (6 * 0.05)
+              and
+              job:coffeeshop_latency_errors:ratio_rate30m > (6 * 0.05)
+            )
+          for: 15m
+          labels:
+            severity: critical
+            slo: latency
+            service: coffeeshop
+          annotations:
+            summary: "Coffeeshop latency SLO — critical slow burn"
+            description: >-
+              {{ $value | humanizePercentage }} of requests exceeded 500 ms
+              over the last 6 hours (budget threshold: 30 %).  The latency
+              error budget is burning fast.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-latency.md"
+
+        # ── Warning: slow burn ────────────────────────────────────────────────
+        - alert: CoffeeshopLatencyWarningSlowBurn
+          expr: |
+            (
+              job:coffeeshop_latency_errors:ratio_rate3d > (1 * 0.05)
+              and
+              job:coffeeshop_latency_errors:ratio_rate6h > (1 * 0.05)
+            )
+          for: 1h
+          labels:
+            severity: warning
+            slo: latency
+            service: coffeeshop
+          annotations:
+            summary: "Coffeeshop latency SLO — warning slow burn"
+            description: >-
+              {{ $value | humanizePercentage }} of requests exceeded 500 ms
+              over the last 3 days.  The p95 latency SLO may be missed by
+              end of the 28-day window.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-latency.md"

@@ -52,7 +52,8 @@ acm_hcp_argocd_demo/
 ├── README.md
 ├── acm-policies/                           # ACM Policies applied to spoke clusters
 │   ├── openshift-gitops-policy.yaml        # Installs OpenShift GitOps operator on spokes
-│   └── openshift-pipelines-policy.yaml     # Installs OpenShift Pipelines operator on spokes
+│   ├── openshift-pipelines-policy.yaml     # Installs OpenShift Pipelines operator on spokes
+│   └── slo-observability-policy.yaml       # Enables user workload monitoring + SLO compliance checks
 ├── ansible/
 │   └── playbook/
 │       ├── create_hcp_cluster_cli.yaml     # Playbook: provision HCP cluster via hcp CLI
@@ -64,8 +65,8 @@ acm_hcp_argocd_demo/
 ├── argocd/                                 # Hub wiring: ACM + Argo CD integration
 │   ├── kustomization.yaml                  # Ordered Kustomize entry point
 │   ├── acm-placement-configmap.yaml        # Teaches ApplicationSet to read PlacementDecisions
-│   ├── acm-placement-configmap.yaml
 │   ├── app-acm-policies.yaml               # Argo CD Application syncing acm-policies/
+│   ├── app-slo-coffeeshop.yaml             # Argo CD Application deploying slo/ to coffeeshop cluster
 │   ├── appproject.yaml                     # AppProject scoping HyperShift resource kinds
 │   ├── applicationset.yaml                 # ApplicationSet deploying hcp/ to local-cluster
 │   ├── argocd-acm-policy-rbac.yaml         # RBAC: Argo CD SA → ACM policy/placement kinds
@@ -76,11 +77,16 @@ acm_hcp_argocd_demo/
 │   └── placement.yaml                      # ACM Placement selecting hub (local-cluster)
 ├── file_for_demo/
 │   └── network-security-policy.yaml        # Example ACM Policy: default-deny NetworkPolicy
-└── hcp/                                    # HyperShift manifests — Argo CD sync target
-    ├── hosted_cluster.yaml                 # HostedCluster: development
-    ├── hosted_cluster_coffeeshop.yaml      # HostedCluster: coffeeshop
-    ├── nodePool.yaml                       # NodePool: development
-    └── nodePool_coffeeshop.yaml            # NodePool: coffeeshop
+├── hcp/                                    # HyperShift manifests — Argo CD sync target
+│   ├── hosted_cluster.yaml                 # HostedCluster: development
+│   ├── hosted_cluster_coffeeshop.yaml      # HostedCluster: coffeeshop
+│   ├── nodePool.yaml                       # NodePool: development
+│   └── nodePool_coffeeshop.yaml            # NodePool: coffeeshop
+└── slo/                                    # SLI/SLO definitions — deployed to spoke clusters
+    ├── kustomization.yaml                  # Kustomize entry point
+    ├── namespace.yaml                      # coffeeshop application namespace
+    ├── coffeeshop-slo-availability.yaml    # PrometheusRule: 99.9 % availability SLO
+    └── coffeeshop-slo-latency.yaml         # PrometheusRule: 95 % p95 ≤ 500 ms latency SLO
 ```
 
 ## Prerequisites
@@ -168,7 +174,226 @@ This file is not automatically synced by Argo CD; it is applied manually for dem
 
 ---
 
-## Manual Commands Reference
+## SLI / SLO Ops
+
+### What are SLIs and SLOs?
+
+| Term | Meaning | Example |
+|---|---|---|
+| **SLI** — Service Level Indicator | A quantitative measurement of a service behavior | Ratio of HTTP requests that return a non-5xx response |
+| **SLO** — Service Level Objective | A target value (or range) for an SLI over a time window | 99.9 % of requests succeed over any 28-day rolling window |
+| **Error Budget** | The allowed margin of failure before the SLO is breached | 0.1 % of requests may fail ≈ 40 minutes of full outage per 28 days |
+| **Burn Rate** | How fast the error budget is being consumed relative to sustainable pace | 14.4× burn = 2 % of budget gone in 1 hour |
+
+**SLO Ops** is the practice of managing SLOs as code, delivered via GitOps, and enforced consistently across every cluster in your fleet. In this demo:
+
+* SLO definitions live in the `slo/` directory as `PrometheusRule` objects.
+* Argo CD deploys them to the correct clusters (the coffeeshop spoke cluster in this case).
+* ACM Policies enforce the infrastructure prerequisites (user workload monitoring enabled) and raise a compliance violation if the rules are missing.
+* ACM Observability aggregates metrics across all clusters into a central Thanos instance so you can build a single cross-cluster SLO dashboard.
+
+---
+
+### SLI / SLO Architecture
+
+```mermaid
+flowchart TD
+    Git["Git Repository\nslo/ directory"]
+
+    subgraph hub [Hub Cluster]
+        ArgoCD["Argo CD\napp-slo-coffeeshop"]
+        ACM["ACM\nslo-observability policy"]
+        Thanos["ACM Observability\nThanos / Grafana"]
+    end
+
+    subgraph coffeeshop [Spoke: coffeeshop cluster]
+        UWM["User Workload\nPrometheus"]
+        SLO_A["PrometheusRule\ncoffeeshop-slo-availability"]
+        SLO_L["PrometheusRule\ncoffeeshop-slo-latency"]
+        App["coffeeshop\napplication"]
+        AM["Alertmanager"]
+    end
+
+    Git -->|"sync slo/"| ArgoCD
+    ArgoCD -->|"deploy PrometheusRules"| SLO_A
+    ArgoCD -->|"deploy PrometheusRules"| SLO_L
+    ACM -->|"enforce user workload monitoring\ncheck rule compliance"| coffeeshop
+    App -->|"http_requests_total\nhttp_request_duration_seconds"| UWM
+    SLO_A --> UWM
+    SLO_L --> UWM
+    UWM -->|"SLO burn-rate alerts"| AM
+    UWM -->|"forward SLI metrics"| Thanos
+```
+
+---
+
+### SLOs Defined in This Demo
+
+#### Coffeeshop — Availability SLO (`slo/coffeeshop-slo-availability.yaml`)
+
+| Property | Value |
+|---|---|
+| **SLI** | Fraction of HTTP requests that return a non-5xx status code |
+| **SLO target** | 99.9 % over a 28-day rolling window |
+| **Error budget** | 0.1 % ≈ 40 minutes of permitted errors per 28 days |
+
+Multi-burn-rate alerts:
+
+| Alert | Severity | Windows | Burn rate | Budget consumed |
+|---|---|---|---|---|
+| `CoffeeshopAvailabilityCriticalFastBurn` | critical | 5 m + 1 h | 14.4 × | 2 % in 1 h — page now |
+| `CoffeeshopAvailabilityCriticalSlowBurn` | critical | 30 m + 6 h | 6 × | 5 % in 6 h — page soon |
+| `CoffeeshopAvailabilityWarningSlowBurn` | warning | 6 h + 3 d | 1 × | budget exhaustion imminent |
+| `CoffeeshopAvailabilityErrorBudgetLow` | info | 28 d | — | < 25 % budget remaining |
+
+#### Coffeeshop — Latency SLO (`slo/coffeeshop-slo-latency.yaml`)
+
+| Property | Value |
+|---|---|
+| **SLI** | Fraction of HTTP requests served within 500 ms |
+| **SLO target** | 95 % of requests ≤ 500 ms over a 28-day rolling window |
+| **Error budget** | 5 % of requests may exceed 500 ms |
+
+Multi-burn-rate alerts:
+
+| Alert | Severity | Windows | Burn rate | Budget consumed |
+|---|---|---|---|---|
+| `CoffeeshopLatencyCriticalFastBurn` | critical | 5 m + 1 h | 14.4 × | 2 % in 1 h — page now |
+| `CoffeeshopLatencyCriticalSlowBurn` | critical | 30 m + 6 h | 6 × | 5 % in 6 h — page soon |
+| `CoffeeshopLatencyWarningSlowBurn` | warning | 6 h + 3 d | 1 × | budget exhaustion imminent |
+
+---
+
+### How the Multi-Burn-Rate Alert Strategy Works
+
+The standard single-threshold alert (`error_rate > 0.1 %`) generates too many false positives for short-lived spikes and alerts too slowly for sustained incidents.
+
+**Multi-burn-rate alerting** (from the Google SRE Book, Chapter 5) uses pairs of windows:
+
+1. A **long window** detects a sustained trend.
+2. A **short window** confirms the issue is still happening _right now_.
+
+Both must be elevated simultaneously, which dramatically reduces false positives while keeping detection time low for fast burns.
+
+```
+Error rate 2.0 %  ──┐  14.4 × budget (critical)  → page within 5 minutes
+                    │
+Error rate 0.6 %  ──┤   6.0 × budget (critical)  → page within 30 minutes
+                    │
+Error rate 0.1 %  ──┘   1.0 × budget (warning)   → ticket within 6 hours
+                     (SLO threshold = 0.1 %)
+```
+
+---
+
+### Deploying the SLO Demo
+
+#### Step 1 — Enable user workload monitoring via ACM Policy
+
+The `slo-observability-policy.yaml` in `acm-policies/` is already picked up by the `acm-policies` Argo CD Application. Once synced, ACM enforces the policy on every spoke cluster:
+
+```bash
+# Verify the policy was synced and is compliant on the coffeeshop cluster
+oc get policy slo-observability -n acm-policies
+oc get policy.open-cluster-management.io/coffeeshop.slo-observability -n coffeeshop
+```
+
+#### Step 2 — Deploy the SLO PrometheusRules via Argo CD
+
+```bash
+# Apply the Argo CD Application that deploys slo/ to the coffeeshop cluster
+oc apply -f argocd/app-slo-coffeeshop.yaml
+
+# Verify the Application is synced
+oc get application slo-coffeeshop -n openshift-gitops
+
+# Force a manual sync if needed
+oc patch application slo-coffeeshop -n openshift-gitops \
+  --type merge \
+  -p '{"operation": {"sync": {}}}'
+```
+
+#### Step 3 — Verify the PrometheusRules on the coffeeshop cluster
+
+```bash
+# Switch context to the coffeeshop cluster
+export KUBECONFIG=./kubeconfig   # extracted from the hosted cluster secret
+
+# Confirm both PrometheusRule objects exist
+oc get prometheusrule -n coffeeshop
+
+# Confirm user workload monitoring is active
+oc get pods -n openshift-user-workload-monitoring
+
+# Query the SLI recording rule directly from the Prometheus API
+oc -n openshift-user-workload-monitoring exec -c prometheus \
+  $(oc get pod -n openshift-user-workload-monitoring -l app.kubernetes.io/name=prometheus -o name | head -1) \
+  -- curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_http_errors:ratio_rate5m' \
+  | python3 -m json.tool
+```
+
+#### Step 4 — Simulate an SLO breach (demo scenario)
+
+To show a burn-rate alert firing, you can inject errors or throttle the application to push the error rate above the alert threshold:
+
+```bash
+# On the coffeeshop cluster — scale down the app to simulate an outage
+oc scale deployment coffeeshop --replicas=0 -n coffeeshop
+
+# Watch the error ratio recording rule climb (run on the hub via ACM Observability,
+# or locally on the spoke via the user workload Prometheus)
+watch -n 5 'oc -n openshift-user-workload-monitoring exec \
+  $(oc get pod -n openshift-user-workload-monitoring -l app.kubernetes.io/name=prometheus -o name | head -1) \
+  -c prometheus -- \
+  curl -s "http://localhost:9090/api/v1/query?query=job:coffeeshop_http_errors:ratio_rate5m"'
+
+# Restore the application
+oc scale deployment coffeeshop --replicas=1 -n coffeeshop
+```
+
+#### Step 5 — Observe across clusters via ACM Observability
+
+ACM Observability (MultiClusterObservability operator) aggregates metrics from all managed clusters into a central Thanos instance on the hub. Once the add-on is active, you can query the SLI metrics from all clusters in a single Grafana instance.
+
+```bash
+# Check that the observability add-on is active on the coffeeshop cluster
+oc get managedclusteraddon observability-controller \
+  -n coffeeshop
+
+# Open the ACM Grafana dashboard (hub cluster)
+oc get route grafana -n open-cluster-management-observability -o jsonpath='{.spec.host}'
+```
+
+Useful PromQL queries for the ACM Grafana dashboards:
+
+```promql
+# Error budget remaining (1 = full, 0 = exhausted) — all clusters
+job:coffeeshop_availability_slo:error_budget_remaining
+
+# 5-minute error ratio per cluster
+job:coffeeshop_http_errors:ratio_rate5m
+
+# p95 latency per cluster
+job:coffeeshop_latency_p95:rate5m
+
+# Active burn-rate alerts
+ALERTS{slo=~"availability|latency", service="coffeeshop"}
+```
+
+---
+
+### Adding SLOs for New Clusters or Services
+
+The GitOps model makes it trivial to add SLOs for new services or clusters:
+
+1. Create a new `PrometheusRule` YAML in `slo/` following the same pattern.
+2. Add it to `slo/kustomization.yaml`.
+3. If the new SLO targets a different cluster, create a corresponding `argocd/app-slo-<cluster>.yaml`.
+4. Commit and push — Argo CD reconciles the change automatically.
+
+For a new cluster to receive the SLO infrastructure prerequisites (user workload monitoring), it must match the `slo-observability-placement` ACM Placement — which currently targets all spokes. No additional action is needed.
+
+---
 
 ### Hub setup — Argo CD wiring
 
@@ -309,4 +534,49 @@ oc get application -n openshift-gitops -o wide
 
 # List all ApplicationSets
 oc get applicationset -n openshift-gitops
+```
+
+### SLI / SLO operations
+
+```bash
+# Deploy the SLO Argo CD Application
+oc apply -f argocd/app-slo-coffeeshop.yaml
+
+# Check SLO Application sync status
+oc get application slo-coffeeshop -n openshift-gitops
+
+# Check policy compliance for the SLO observability policy across all clusters
+oc get policy slo-observability -n acm-policies
+
+# Verify PrometheusRules exist on the coffeeshop spoke cluster
+# (requires KUBECONFIG pointing to the coffeeshop cluster)
+oc get prometheusrule -n coffeeshop
+
+# Verify user workload monitoring pods are running on a spoke cluster
+oc get pods -n openshift-user-workload-monitoring
+
+# Query the availability error ratio from the user workload Prometheus (spoke)
+oc -n openshift-user-workload-monitoring exec \
+  $(oc get pod -n openshift-user-workload-monitoring \
+    -l app.kubernetes.io/name=prometheus -o name | head -1) \
+  -c prometheus -- \
+  curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_http_errors:ratio_rate5m'
+
+# Query the remaining error budget (28-day window)
+oc -n openshift-user-workload-monitoring exec \
+  $(oc get pod -n openshift-user-workload-monitoring \
+    -l app.kubernetes.io/name=prometheus -o name | head -1) \
+  -c prometheus -- \
+  curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_availability_slo:error_budget_remaining'
+
+# Check active SLO burn-rate alerts
+oc -n openshift-user-workload-monitoring exec \
+  $(oc get pod -n openshift-user-workload-monitoring \
+    -l app.kubernetes.io/name=prometheus -o name | head -1) \
+  -c prometheus -- \
+  curl -s 'http://localhost:9090/api/v1/alerts' | python3 -m json.tool
+
+# Get the ACM Observability Grafana URL (hub cluster)
+oc get route grafana -n open-cluster-management-observability \
+  -o jsonpath='https://{.spec.host}\n'
 ```
