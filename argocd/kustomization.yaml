@@ -7,8 +7,13 @@ resources:
   - argocd-hypershift-rbac.yaml
   - argocd-acm-policy-rbac.yaml
   - managedclustersetbinding.yaml
+  # Hub placement + GitOpsCluster (local-cluster only)
   - placement.yaml
   - gitopscluster.yaml
+  # Spoke placement + GitOpsCluster (registers spokes with hub Argo CD)
+  - spoke-placement.yaml
+  - spoke-gitopscluster.yaml
   - appproject.yaml
   - applicationset.yaml
   - app-acm-policies.yaml
+  - app-slo-coffeeshop.yaml

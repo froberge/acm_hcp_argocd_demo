@@ -73,9 +73,11 @@ acm_hcp_argocd_demo/
 │   ├── argocd-acm-policy-rbac.yaml         # RBAC: Argo CD SA → ACM policy/placement kinds
 │   ├── argocd-hypershift-rbac.yaml         # RBAC: Argo CD SA → HostedCluster/NodePool kinds
 │   ├── gitopscluster-rbac.yaml             # RBAC: ApplicationSet SA → PlacementDecisions
-│   ├── gitopscluster.yaml                  # Registers hub with Argo CD via ACM
+│   ├── gitopscluster.yaml                  # Registers hub with Argo CD via ACM (hub only)
 │   ├── managedclustersetbinding.yaml       # Binds default ClusterSet into openshift-gitops ns
-│   └── placement.yaml                      # ACM Placement selecting hub (local-cluster)
+│   ├── placement.yaml                      # ACM Placement selecting hub (local-cluster)
+│   ├── spoke-placement.yaml                # ACM Placement selecting all spoke clusters
+│   └── spoke-gitopscluster.yaml            # Registers spoke clusters with hub Argo CD
 ├── file_for_demo/
 │   └── network-security-policy.yaml        # Example ACM Policy: default-deny NetworkPolicy
 ├── hcp/                                    # HyperShift manifests — Argo CD sync target
@@ -199,11 +201,16 @@ This file is not automatically synced by Argo CD; it is applied manually for dem
 
 ```mermaid
 flowchart TD
-    Git["Git Repository\nslo/ directory"]
+    Git["Git Repository\nslo/ + argocd/"]
 
     subgraph hub [Hub Cluster]
-        ArgoCD["Argo CD\napp-slo-coffeeshop"]
-        ACM["ACM\nslo-observability policy"]
+        ArgoCD["Argo CD\n(openshift-gitops)"]
+        ACM["ACM"]
+        SpokePlacement["Placement\nspoke-placement"]
+        SpokeGOC["GitOpsCluster\nspoke-gitops-cluster"]
+        AppSLO["Application\napp-slo-coffeeshop"]
+        PolicyInfra["Policy\nslo-infrastructure"]
+        PolicyVerify["Policy\nslo-verify-coffeeshop"]
         Thanos["ACM Observability\nThanos / Grafana"]
     end
 
@@ -213,12 +220,25 @@ flowchart TD
         SLO_L["PrometheusRule\ncoffeeshop-slo-latency"]
         App["coffeeshop\napplication"]
         AM["Alertmanager"]
+        NS["Namespace\ncoffeeshop"]
+        CM["ConfigMap\ncluster-monitoring-config"]
     end
 
-    Git -->|"sync slo/"| ArgoCD
-    ArgoCD -->|"deploy PrometheusRules"| SLO_A
-    ArgoCD -->|"deploy PrometheusRules"| SLO_L
-    ACM -->|"enforce user workload monitoring\ncheck rule compliance"| coffeeshop
+    Git -->|"sync argocd/"| ArgoCD
+    ArgoCD --> SpokePlacement
+    SpokePlacement --> SpokeGOC
+    SpokeGOC -->|"register coffeeshop\nas Argo CD destination"| ArgoCD
+    ArgoCD --> AppSLO
+    AppSLO -->|"deploy slo/"| SLO_A
+    AppSLO -->|"deploy slo/"| SLO_L
+
+    ACM --> PolicyInfra
+    PolicyInfra -->|enforce| CM
+    PolicyInfra -->|enforce| NS
+    ACM --> PolicyVerify
+    PolicyVerify -->|"inform: check existence"| SLO_A
+    PolicyVerify -->|"inform: check existence"| SLO_L
+
     App -->|"http_requests_total\nhttp_request_duration_seconds"| UWM
     SLO_A --> UWM
     SLO_L --> UWM
@@ -308,13 +328,19 @@ oc get policy slo-infrastructure slo-verify-coffeeshop -n acm-policies
 oc get policy.open-cluster-management.io -A | grep slo
 ```
 
-#### Step 2 — Deploy the SLO PrometheusRules via Argo CD
+#### Step 2 — Register spoke clusters with hub Argo CD and deploy SLO rules
+
+`spoke-placement.yaml` and `spoke-gitopscluster.yaml` are already included in `argocd/kustomization.yaml`, so re-applying the hub wiring registers all spoke clusters as Argo CD destinations and deploys the SLO `Application` in one shot:
 
 ```bash
-# Apply the Argo CD Application that deploys slo/ to the coffeeshop cluster
-oc apply -f argocd/app-slo-coffeeshop.yaml
+# Re-apply the hub wiring (idempotent — safe to run again)
+oc apply -k argocd/
 
-# Verify the Application is synced
+# Verify the spoke clusters are now registered with Argo CD
+# (ACM creates a cluster secret for each spoke in openshift-gitops)
+oc get secret -n openshift-gitops -l argocd.argoproj.io/secret-type=cluster
+
+# Verify the SLO Application was created and is syncing
 oc get application slo-coffeeshop -n openshift-gitops
 
 # Force a manual sync if needed

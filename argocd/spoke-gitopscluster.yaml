@@ -1,0 +1,23 @@
+---
+# GitOpsCluster: registers all spoke clusters (matched by spoke-placement)
+# with the hub Argo CD instance in the openshift-gitops namespace.
+#
+# ACM automatically creates an Argo CD cluster secret for each matched
+# ManagedCluster.  The secret name — and therefore the Argo CD destination
+# name — equals the ManagedCluster name (e.g. "coffeeshop", "development").
+#
+# This enables Argo CD Applications on the hub (such as app-slo-coffeeshop.yaml)
+# to use  destination.name: <cluster-name>  to deploy resources to a spoke.
+apiVersion: apps.open-cluster-management.io/v1beta1
+kind: GitOpsCluster
+metadata:
+  name: spoke-gitops-cluster
+  namespace: openshift-gitops
+spec:
+  argoServer:
+    cluster: local-cluster
+    argoNamespace: openshift-gitops
+  placementRef:
+    apiVersion: cluster.open-cluster-management.io/v1beta1
+    kind: Placement
+    name: spoke-placement
