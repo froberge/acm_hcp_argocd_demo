@@ -63,7 +63,15 @@ spec:
                             - alertname = Watchdog
                           receiver: watchdog
                     receivers:
+                      # A webhook integration is required so that the
+                      # cluster:alertmanager_integrations:max metric is > 0,
+                      # which clears the AlertmanagerReceiversNotConfigured warning.
+                      # The localhost URL intentionally goes nowhere — replace with
+                      # a real endpoint (Slack, PagerDuty, email…) for production.
                       - name: default
+                        webhook_configs:
+                          - url: 'http://localhost:9999/devnull'
+                            send_resolved: false
                       - name: watchdog
                     inhibit_rules:
                       - source_matchers:
