@@ -1,0 +1,29 @@
+---
+# OpenShift Route — exposes the Grafana instance externally.
+#
+# The Grafana Community Operator v5 does not auto-create a Route on OpenShift.
+# This Route points to the service the operator creates for the Grafana instance
+# (named <grafana-cr-name>-service, i.e. coffeeshop-grafana-service on port 3000).
+#
+# TLS termination is edge so the browser-to-router connection is encrypted,
+# while the router-to-pod leg runs in-cluster over plain HTTP (acceptable for demo).
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: coffeeshop-grafana
+  namespace: grafana-slo
+  labels:
+    app.kubernetes.io/part-of: coffeeshop
+    app.kubernetes.io/component: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  port:
+    targetPort: grafana
+  to:
+    kind: Service
+    name: coffeeshop-grafana-service
+    weight: 100
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

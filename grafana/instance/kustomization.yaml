@@ -4,3 +4,4 @@ resources:
   - grafana-instance.yaml
   - grafana-datasource.yaml
   - grafana-dashboard.yaml
+  - grafana-route.yaml
