@@ -1,0 +1,38 @@
+---
+# ACM Observability — custom metrics forwarding allowlist
+#
+# By default the ACM metrics collector (obs-addon-collector) on each spoke
+# cluster only forwards a predefined set of platform metrics to the hub
+# Thanos store.  Custom recording-rule time series produced by our SLO
+# PrometheusRules are NOT in that default list and will not appear in the
+# hub Grafana unless they are added here.
+#
+# This ConfigMap is merged into the existing
+# `observability-metrics-custom-allowlist` ConfigMap (if any) by the ACM
+# Observability operator.  Argo CD will create it if it does not exist.
+#
+# Ref: https://access.redhat.com/documentation/en-us/red_hat_advanced_cluster_management_for_kubernetes/2.10/html/observability/observing-environments-intro#adding-custom-metrics
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: observability-metrics-custom-allowlist
+  namespace: open-cluster-management-observability
+data:
+  metrics_list.yaml: |
+    names:
+      # ── Availability SLO (pod readiness) ─────────────────────────────
+      - job:coffeeshop_pod_notready:ratio_rate5m
+      - job:coffeeshop_pod_notready:ratio_rate30m
+      - job:coffeeshop_pod_notready:ratio_rate1h
+      - job:coffeeshop_pod_notready:ratio_rate6h
+      - job:coffeeshop_pod_notready:ratio_rate3d
+      - job:coffeeshop_availability_slo:error_budget_remaining
+      # ── Stability SLO (container restart rate) ───────────────────────
+      - job:coffeeshop_restart_rate:rate5m
+      - job:coffeeshop_restart_rate:rate30m
+      - job:coffeeshop_restart_rate:rate1h
+      - job:coffeeshop_restart_rate:rate6h
+      - job:coffeeshop_restart_rate:rate3d
+      - job:coffeeshop_restart_count:increase28d
+      # ── Base kube-state-metrics series used by dashboard panels ──────
+      - kube_pod_status_ready

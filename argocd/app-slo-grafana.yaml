@@ -1,0 +1,43 @@
+---
+# Argo CD Application — SLO Grafana dashboard and metrics allowlist (hub)
+#
+# Deploys two ConfigMaps to the hub cluster's
+# open-cluster-management-observability namespace:
+#
+#   1. observability-metrics-custom-allowlist
+#      Tells the ACM metrics collector on each spoke to forward the
+#      coffeeshop SLO recording-rule time series to the hub Thanos store.
+#      Without this, custom recording rules stay local to the spoke and
+#      are not visible in the hub Grafana.
+#
+#   2. grafana-dashboard-coffeeshop-slo
+#      ConfigMap labelled grafana-custom-dashboard: "true" that ACM
+#      Observability's Grafana sidecar hot-loads as a dashboard.
+#
+# This Application targets the hub cluster itself (in-cluster), not a spoke.
+# The hub's Argo CD instance (openshift-gitops) has in-cluster access and
+# can deploy directly to the hub without going through ACM GitOpsCluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: slo-grafana-hub
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: coffeeshop
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/froberge/acm_hcp_argocd_demo
+    targetRevision: main
+    path: grafana
+  destination:
+    # Deploy to the hub cluster itself.
+    server: https://kubernetes.default.svc
+    namespace: open-cluster-management-observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - RespectIgnoreDifferences=true
