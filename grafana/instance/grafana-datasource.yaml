@@ -1,10 +1,15 @@
 ---
-# GrafanaDataSource — connects this Grafana instance to the cluster's
+# GrafanaDatasource — connects this Grafana instance to the cluster's
 # Thanos Querier (openshift-monitoring).
 #
-# Authentication: the Thanos Querier on OpenShift requires a Bearer token.
-# bearerTokenFile points to the projected SA token mounted in the Grafana
-# pod by grafana-instance.yaml — no static secret is stored in Git.
+# Authentication: the Grafana Community Operator v5 CRD does not have a
+# top-level bearerTokenFile field in spec.datasource.  Instead we use:
+#   - jsonData.httpHeaderName1: "Authorization"   — names the custom header
+#   - spec.valuesFrom                             — injects "Bearer <token>"
+#     from the grafana-thanos-token Secret (created once on the cluster by
+#     running: oc create token grafana-serviceaccount -n grafana-slo
+#              --duration=8760h | xargs -I{} oc create secret generic
+#              grafana-thanos-token -n grafana-slo --from-literal="token=Bearer {}")
 #
 # TLS: tlsSkipVerify is true because the Thanos Querier uses a
 # cluster-internal certificate signed by the OpenShift internal CA.
@@ -29,12 +34,19 @@ spec:
   instanceSelector:
     matchLabels:
       dashboards: "coffeeshop"
+  # Inject the Bearer token from the grafana-thanos-token Secret so Grafana
+  # can authenticate to Thanos Querier via the custom Authorization header.
+  valuesFrom:
+    - targetPath: "datasource.secureJsonData.httpHeaderValue1"
+      valueFrom:
+        secretKeyRef:
+          name: grafana-thanos-token
+          key: token
   datasource:
     name: Thanos
     type: prometheus
     access: proxy
     # Internal Thanos Querier endpoint — port 9091 requires Bearer token auth.
-    # Port 9092 (web) requires oauth-proxy; 9091 is the simpler choice for GitOps.
     url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
     isDefault: true
     editable: false
@@ -42,9 +54,5 @@ spec:
       timeInterval: "30s"
       tlsSkipVerify: true
       httpMethod: GET
-      # bearerTokenFile is in the Grafana datasource JSON model but was removed
-      # from the v5 CRD schema (the operator strips it on apply).
-      # Authentication is handled by the projected SA token mounted at the pod level
-      # via grafana-instance.yaml; the Grafana binary reads it directly from the
-      # file system using the standard bearerTokenFile datasource setting injected
-      # through the operator's grafana.ini or datasource provisioning path.
+      # Name the custom header; the value is injected via spec.valuesFrom above.
+      httpHeaderName1: "Authorization"
