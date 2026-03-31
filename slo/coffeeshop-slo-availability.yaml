@@ -31,7 +31,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: coffeeshop-slo-availability
-  namespace: coffeeshop
+  namespace: openshift-monitoring
   labels:
     app.kubernetes.io/name: coffeeshop
     app.kubernetes.io/component: slo

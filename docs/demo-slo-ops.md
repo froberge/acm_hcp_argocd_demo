@@ -30,18 +30,21 @@ Git repository (slo/)
         ▼                                                            ▼
   coffeeshop cluster                                        ACM hub
   ┌──────────────────────────────┐              ┌──────────────────────────────┐
-  │  Namespace: coffeeshop       │              │  Policy: slo-infrastructure  │
-  │  ┌────────────────────────┐  │◄─ enforce ───│  (enables UWM on all spokes) │
-  │  │ PrometheusRule         │  │              ├──────────────────────────────┤
-  │  │ coffeeshop-slo-        │  │              │  Policy: slo-verify-         │
-  │  │ availability           │  │◄─ inform ────│  coffeeshop                  │
-  │  ├────────────────────────┤  │  (checks     │  (compliance = rules exist)  │
-  │  │ PrometheusRule         │  │   existence) └──────────────────────────────┘
+  │  Namespace: openshift-       │              │  Policy: slo-infrastructure  │
+  │  monitoring                  │◄─ enforce ───│  (enables UWM on all spokes) │
+  │  ┌────────────────────────┐  │              ├──────────────────────────────┤
+  │  │ PrometheusRule         │  │              │  Policy: slo-verify-         │
+  │  │ coffeeshop-slo-        │  │◄─ inform ────│  coffeeshop                  │
+  │  │ availability           │  │  (checks     │  (checks openshift-monitoring│
+  │  ├────────────────────────┤  │   existence) │   for both PrometheusRules)  │
+  │  │ PrometheusRule         │  │              └──────────────────────────────┘
   │  │ coffeeshop-slo-        │  │
   │  │ latency (stability)    │  │
   │  └────────────────────────┘  │
-  │  User Workload Prometheus     │
-  │  evaluates rules every 30s    │
+  │  Platform Prometheus         │
+  │  (prometheus-k8s) evaluates  │
+  │  rules — has kube-state-     │
+  │  metrics access              │
   └──────────────────────────────┘
 ```
 
@@ -116,7 +119,7 @@ Point out:
 In the **Argo CD UI → Applications**, open `slo-coffeeshop`:
 - Status: `Synced / Healthy`
 - Source: `slo/` path in this repository
-- Destination: `coffeeshop` cluster, `coffeeshop` namespace
+- Destination: `coffeeshop` cluster, `openshift-monitoring` namespace
 
 ```bash
 # Hub cluster
@@ -135,11 +138,11 @@ Point out the destination cluster is the **spoke** (coffeeshop), not the hub —
 # Switch to coffeeshop cluster kubeconfig
 export KUBECONFIG=./kubeconfig   # extracted via: oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=.
 
-# Confirm both PrometheusRules exist
-oc get prometheusrule -n coffeeshop
+# Confirm both PrometheusRules exist in openshift-monitoring
+oc get prometheusrule -n openshift-monitoring | grep coffeeshop
 
-# Confirm user workload monitoring pods are running
-oc get pods -n openshift-user-workload-monitoring
+# Confirm the platform Prometheus pods are running
+oc get pods -n openshift-monitoring -l app.kubernetes.io/name=prometheus
 ```
 
 ---
@@ -148,7 +151,7 @@ oc get pods -n openshift-user-workload-monitoring
 
 **Talking point:** "The recording rules pre-compute the error ratios continuously. We can query the current error rate and remaining error budget in real time."
 
-The user workload Prometheus does not expose a Route by default. Use one of the two options below.
+The PrometheusRules live in `openshift-monitoring` and are evaluated by the **platform Prometheus** (`prometheus-k8s`). Their results flow through the Thanos Querier, which means they are visible in the OpenShift console without any project-selector restriction. Use one of the two options below.
 
 #### Option A — OpenShift console (best for presentations)
 
@@ -172,7 +175,7 @@ oc extract -n local-cluster secret/coffeeshop-kubeadmin-password --to=-
 **3. Switch to the Administrator perspective** — in the top-left corner of the console, click the perspective switcher (it may say "Developer") and select **Administrator**.
 The Administrator perspective has the full PromQL query interface. The Developer perspective has a simplified metrics browser that does not accept raw PromQL.
 
-**4. The project selector does not affect these queries** — the Observe → Metrics page always routes through the Thanos Querier regardless of which project is selected. The namespace is specified directly inside the PromQL expressions instead (e.g. `namespace="coffeeshop-dev"`).
+**4. No project selection needed** — the recording rules produced by the platform Prometheus (`prometheus-k8s`) are visible globally through the Thanos Querier. You do not need to switch to a specific project. The namespace is embedded inside the PromQL expressions themselves (e.g. `namespace="coffeeshop-dev"`).
 
 **5. Navigate to Observe → Metrics** in the left sidebar.
 
@@ -196,7 +199,9 @@ kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*"}
 #### Show the alerting rules are loaded
 
 In the console: go to **Observe → Alerting → Alerting rules tab**.
-- You should see all six SLO alerting rules (`CoffeeshopAvailabilityCriticalFastBurn`, `CoffeeshopStabilityCriticalFastBurn`, etc.) with state **Inactive** (correct — pods are healthy)
+- Use the search box to filter by `coffeeshop`.
+- You should see all six SLO alerting rules (`CoffeeshopAvailabilityCriticalFastBurn`, `CoffeeshopStabilityCriticalFastBurn`, etc.) with state **Inactive** (correct — pods are healthy).
+- These rules appear here because they live in `openshift-monitoring` and are evaluated by the platform Prometheus.
 
 **Talking point:** "The rules are loaded and being evaluated every 30 seconds against live kube-state-metrics data. Inactive means we are within our SLO right now."
 
@@ -221,13 +226,15 @@ In the console: go to **Observe → Alerting → Alerting rules tab**.
 
 #### Option B — Port-forward (best for CLI-heavy demos)
 
+The recording rules are evaluated by the **platform Prometheus** (`prometheus-k8s`), not the user workload Prometheus. Port-forward accordingly:
+
 ```bash
 # Ensure KUBECONFIG points to the coffeeshop cluster
 export KUBECONFIG=./kubeconfig   # extracted via: oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=.
 
-# Port-forward the user workload Prometheus pod to localhost:9090
-oc port-forward -n openshift-user-workload-monitoring \
-  $(oc get pod -n openshift-user-workload-monitoring \
+# Port-forward the platform Prometheus pod to localhost:9090
+oc port-forward -n openshift-monitoring \
+  $(oc get pod -n openshift-monitoring \
     -l app.kubernetes.io/name=prometheus -o name | head -1) \
   9090:9090
 ```
@@ -301,7 +308,7 @@ oc scale deployment coffeeshop --replicas=1 -n coffeeshop-dev
 
 ```bash
 # On the coffeeshop cluster — delete one PrometheusRule manually
-oc delete prometheusrule coffeeshop-slo-availability -n coffeeshop
+oc delete prometheusrule coffeeshop-slo-availability -n openshift-monitoring
 ```
 
 Within ~1 minute:
@@ -310,7 +317,7 @@ Within ~1 minute:
 
 ```bash
 # Watch Argo CD restore the rule
-oc get prometheusrule coffeeshop-slo-availability -n coffeeshop --watch
+oc get prometheusrule coffeeshop-slo-availability -n openshift-monitoring --watch
 ```
 
 This closes the demo loop: **Git is the single source of truth, and any deviation from it is detected and corrected automatically.**
@@ -366,10 +373,10 @@ ALERTS{service="coffeeshop", slo="stability"}
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `slo-verify-coffeeshop` NonCompliant | PrometheusRules not deployed | Check `oc get application slo-coffeeshop -n openshift-gitops` |
+| `slo-verify-coffeeshop` NonCompliant | PrometheusRules not deployed | Check `oc get application slo-coffeeshop -n openshift-gitops`; confirm rules exist with `oc get prometheusrule -n openshift-monitoring \| grep coffeeshop` |
 | Argo CD Application `Unknown` / `Missing` destination | coffeeshop cluster secret not created yet | Wait 2 min after `oc apply -k argocd/`, re-check `oc get secret -n openshift-gitops -l argocd.argoproj.io/secret-type=cluster` |
-| Recording rules return `no data` | User workload monitoring pods not ready | `oc get pods -n openshift-user-workload-monitoring`; may take 3–5 min after enabling |
+| `job:coffeeshop_pod_notready:ratio_rate5m` returns "No datapoint found" | PrometheusRules not in `openshift-monitoring`, or first evaluation interval not yet complete | Confirm `oc get prometheusrule coffeeshop-slo-availability -n openshift-monitoring`; if it exists, wait 30–60 s for the first evaluation interval |
 | `kube_pod_status_ready{namespace="coffeeshop-dev"}` returns "No datapoint found" | Namespace or pods do not exist | Run `oc get pods -n coffeeshop-dev` on the coffeeshop cluster to confirm the app is deployed |
-| `job:coffeeshop_pod_notready:ratio_rate5m` returns "No datapoint found" | Recording rules not yet evaluated | Wait 30–60 seconds after the PrometheusRules are created; the first evaluation interval must complete |
-| Prometheus UI not reachable | No Route exists for user workload monitoring | Use port-forward: `oc port-forward -n openshift-user-workload-monitoring $(oc get pod -n openshift-user-workload-monitoring -l app.kubernetes.io/name=prometheus -o name \| head -1) 9090:9090` then open http://localhost:9090 |
+| Alerting rules not visible in console | PrometheusRules in wrong namespace | Rules must be in `openshift-monitoring`; check `oc get prometheusrule -n openshift-monitoring \| grep coffeeshop` |
+| Prometheus UI not reachable via port-forward | Wrong namespace used | Port-forward from `openshift-monitoring` (platform Prometheus), not `openshift-user-workload-monitoring`: `oc port-forward -n openshift-monitoring $(oc get pod -n openshift-monitoring -l app.kubernetes.io/name=prometheus -o name \| head -1) 9090:9090` |
 | Burn-rate alert does not fire after scaling to 0 | Both windows (5m and 1h) need elevated not-ready ratio | Wait the full 5–10 minutes; the 1-hour window must also exceed the threshold before the critical alert fires |

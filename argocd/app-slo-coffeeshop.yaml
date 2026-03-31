@@ -34,10 +34,15 @@ spec:
     # Use the cluster name registered by ACM in Argo CD, or replace with the
     # coffeeshop API server URL (https://<api-host>:6443).
     name: coffeeshop
-    namespace: coffeeshop
+    # PrometheusRules must live in openshift-monitoring so that the platform
+    # Prometheus (prometheus-k8s) evaluates them — it has access to
+    # kube-state-metrics (kube_pod_status_ready, kube_pod_container_status_restarts_total).
+    # The user workload Prometheus (prometheus-user-workload) does NOT scrape
+    # those platform metrics, so rules in user namespaces would return no data.
+    namespace: openshift-monitoring
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
+      - RespectIgnoreDifferences=true

@@ -138,14 +138,14 @@ spec:
                 kind: PrometheusRule
                 metadata:
                   name: coffeeshop-slo-availability
-                  namespace: coffeeshop
+                  namespace: openshift-monitoring
             - complianceType: musthave
               objectDefinition:
                 apiVersion: monitoring.coreos.com/v1
                 kind: PrometheusRule
                 metadata:
                   name: coffeeshop-slo-latency
-                  namespace: coffeeshop
+                  namespace: openshift-monitoring
 ---
 # Placement: coffeeshop cluster only (matched by the managed cluster name label).
 apiVersion: cluster.open-cluster-management.io/v1beta1

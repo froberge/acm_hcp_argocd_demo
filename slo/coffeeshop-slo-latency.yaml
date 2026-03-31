@@ -33,7 +33,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: coffeeshop-slo-latency
-  namespace: coffeeshop
+  namespace: openshift-monitoring
   labels:
     app.kubernetes.io/name: coffeeshop
     app.kubernetes.io/component: slo
