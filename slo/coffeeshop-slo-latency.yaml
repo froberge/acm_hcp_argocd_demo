@@ -1,18 +1,22 @@
 ---
-# SLI/SLO — Latency
+# SLI/SLO — Stability (container restart rate)
 #
 # SLI definition:
-#   The proportion of HTTP requests to the coffeeshop service that are
-#   served within 500 milliseconds (the latency threshold).
-#   This is a "good-event" SLI: a request counts as good if its duration
-#   falls in the 0–500 ms histogram bucket.
+#   The rate of container restarts for the coffeeshop application.
+#   A container restart indicates a crash or OOMKill — each one consumes
+#   a portion of the stability error budget.
+#   The SLI is measured as restarts per second (rate over a time window);
+#   zero restarts = perfect stability.
 #
-# SLO target: 95 % of requests are served within 500 ms over a 28-day
-#             rolling window.
-# Error budget: 5 % of requests may exceed 500 ms.
+# SLO target: fewer than 1 restart per hour on average over a 28-day
+#             rolling window (threshold = 1/3600 restarts/second ≈ 2.78e-4).
+# Error budget: the total number of allowed restarts before the SLO is
+#               considered breached for the month.
 #
-# Multi-burn-rate alerting uses the same window pairs as the availability SLO.
-# The error budget fraction is now 0.05 (5 %) instead of 0.001 (0.1 %).
+# Metric source: kube-state-metrics (always available).
+# Selector:  namespace="coffeeshop-dev", pod=~"coffeeshop-.*"
+#
+# Multi-burn-rate alerting:
 #
 #   Severity   | Burn multiplier | Short window | Long window
 #   -----------|-----------------|--------------|------------
@@ -20,9 +24,11 @@
 #   critical   |  6.0 ×          | 30 m         | 6 h
 #   warning    |  1.0 ×          | 6 h          | 3 d
 #
-# Prerequisites: same as coffeeshop-slo-availability.yaml.
-# The application must expose the standard histogram:
-#   http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}
+# To simulate a stability alert for the demo:
+#   Inject a crash loop by setting a bad command on the deployment, or
+#   simply observe naturally if the app is already restarting.
+#   Alternatively, this alert fires when the pod is restarted manually
+#   enough times in a short window to exceed the threshold.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -36,137 +42,126 @@ spec:
   groups:
 
     # ── Recording rules ──────────────────────────────────────────────────────
+    # Each rule computes the restart rate over a specific time window.
+    # A sustained non-zero rate means the budget is being consumed.
+    # Threshold = 1 restart/hour = 1/3600 s⁻¹ ≈ 0.000278 restarts/second.
 
-    - name: coffeeshop.slo.latency:recordings
+    - name: coffeeshop.slo.stability:recordings
       interval: 30s
       rules:
 
-        # Fraction of requests that exceeded 500 ms over a 5-minute window
-        # (1 - good_ratio = bad_ratio, equivalent to error ratio)
-        - record: job:coffeeshop_latency_errors:ratio_rate5m
+        # Restart rate over 5 minutes
+        - record: job:coffeeshop_restart_rate:rate5m
           expr: |
-            1 - (
-              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[5m]))
-              /
-              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[5m]))
-            )
+            sum(rate(kube_pod_container_status_restarts_total{
+              namespace="coffeeshop-dev", pod=~"coffeeshop-.*"
+            }[5m]))
 
-        - record: job:coffeeshop_latency_errors:ratio_rate30m
+        # Restart rate over 30 minutes
+        - record: job:coffeeshop_restart_rate:rate30m
           expr: |
-            1 - (
-              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[30m]))
-              /
-              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[30m]))
-            )
+            sum(rate(kube_pod_container_status_restarts_total{
+              namespace="coffeeshop-dev", pod=~"coffeeshop-.*"
+            }[30m]))
 
-        - record: job:coffeeshop_latency_errors:ratio_rate1h
+        # Restart rate over 1 hour
+        - record: job:coffeeshop_restart_rate:rate1h
           expr: |
-            1 - (
-              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[1h]))
-              /
-              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[1h]))
-            )
+            sum(rate(kube_pod_container_status_restarts_total{
+              namespace="coffeeshop-dev", pod=~"coffeeshop-.*"
+            }[1h]))
 
-        - record: job:coffeeshop_latency_errors:ratio_rate6h
+        # Restart rate over 6 hours
+        - record: job:coffeeshop_restart_rate:rate6h
           expr: |
-            1 - (
-              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[6h]))
-              /
-              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[6h]))
-            )
+            sum(rate(kube_pod_container_status_restarts_total{
+              namespace="coffeeshop-dev", pod=~"coffeeshop-.*"
+            }[6h]))
 
-        - record: job:coffeeshop_latency_errors:ratio_rate3d
+        # Restart rate over 3 days
+        - record: job:coffeeshop_restart_rate:rate3d
           expr: |
-            1 - (
-              sum(rate(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[3d]))
-              /
-              sum(rate(http_request_duration_seconds_count{job="coffeeshop"}[3d]))
-            )
+            sum(rate(kube_pod_container_status_restarts_total{
+              namespace="coffeeshop-dev", pod=~"coffeeshop-.*"
+            }[3d]))
 
-        # p95 latency over a 5-minute window (useful for dashboards)
-        - record: job:coffeeshop_latency_p95:rate5m
+        # Total restarts in the 28-day window — useful for dashboards.
+        - record: job:coffeeshop_restart_count:increase28d
           expr: |
-            histogram_quantile(0.95,
-              sum by (le) (
-                rate(http_request_duration_seconds_bucket{job="coffeeshop"}[5m])
-              )
-            )
-
-        # Remaining latency error budget as a fraction
-        - record: job:coffeeshop_latency_slo:error_budget_remaining
-          expr: |
-            1 - (
-              1 - (
-                sum(increase(http_request_duration_seconds_bucket{job="coffeeshop", le="0.5"}[28d]))
-                /
-                sum(increase(http_request_duration_seconds_count{job="coffeeshop"}[28d]))
-              )
-            ) / 0.05
+            sum(increase(kube_pod_container_status_restarts_total{
+              namespace="coffeeshop-dev", pod=~"coffeeshop-.*"
+            }[28d]))
 
     # ── Alerting rules ───────────────────────────────────────────────────────
+    # SLO threshold = 1/3600 ≈ 0.000278 restarts/second (1 restart/hour).
+    # Burn-rate multipliers are applied to this threshold.
 
-    - name: coffeeshop.slo.latency:alerts
+    - name: coffeeshop.slo.stability:alerts
       rules:
 
         # ── Critical: fast burn ───────────────────────────────────────────────
-        - alert: CoffeeshopLatencyCriticalFastBurn
+        # Restart rate is 14.4× the sustainable rate over both a short and a
+        # long window — the application is crash-looping.
+        - alert: CoffeeshopStabilityCriticalFastBurn
           expr: |
             (
-              job:coffeeshop_latency_errors:ratio_rate1h  > (14.4 * 0.05)
+              job:coffeeshop_restart_rate:rate1h  > (14.4 * 0.000278)
               and
-              job:coffeeshop_latency_errors:ratio_rate5m  > (14.4 * 0.05)
+              job:coffeeshop_restart_rate:rate5m  > (14.4 * 0.000278)
             )
           for: 2m
           labels:
             severity: critical
-            slo: latency
+            slo: stability
             service: coffeeshop
           annotations:
-            summary: "Coffeeshop latency SLO — critical fast burn"
+            summary: "Coffeeshop stability SLO — critical fast burn (crash loop)"
             description: >-
-              {{ $value | humanizePercentage }} of requests exceeded 500 ms
-              over the last hour (budget threshold: 72 %).  At this rate
-              the latency error budget will be exhausted in less than 1 hour.
-            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-latency.md"
+              The coffeeshop container is restarting at
+              {{ $value | humanize }} restarts/second over the last hour.
+              This is well above the SLO threshold of 1 restart/hour and
+              indicates a crash loop.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/demo-slo-ops.md"
 
         # ── Critical: slow burn ───────────────────────────────────────────────
-        - alert: CoffeeshopLatencyCriticalSlowBurn
+        - alert: CoffeeshopStabilityCriticalSlowBurn
           expr: |
             (
-              job:coffeeshop_latency_errors:ratio_rate6h  > (6 * 0.05)
+              job:coffeeshop_restart_rate:rate6h  > (6 * 0.000278)
               and
-              job:coffeeshop_latency_errors:ratio_rate30m > (6 * 0.05)
+              job:coffeeshop_restart_rate:rate30m > (6 * 0.000278)
             )
           for: 15m
           labels:
             severity: critical
-            slo: latency
+            slo: stability
             service: coffeeshop
           annotations:
-            summary: "Coffeeshop latency SLO — critical slow burn"
+            summary: "Coffeeshop stability SLO — critical slow burn"
             description: >-
-              {{ $value | humanizePercentage }} of requests exceeded 500 ms
-              over the last 6 hours (budget threshold: 30 %).  The latency
-              error budget is burning fast.
-            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-latency.md"
+              The coffeeshop container restart rate has been elevated for 6
+              hours ({{ $value | humanize }} restarts/second). The stability
+              error budget will be exhausted within the current 28-day window.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/demo-slo-ops.md"
 
         # ── Warning: slow burn ────────────────────────────────────────────────
-        - alert: CoffeeshopLatencyWarningSlowBurn
+        - alert: CoffeeshopStabilityWarningSlowBurn
           expr: |
             (
-              job:coffeeshop_latency_errors:ratio_rate3d > (1 * 0.05)
+              job:coffeeshop_restart_rate:rate3d > (1 * 0.000278)
               and
-              job:coffeeshop_latency_errors:ratio_rate6h > (1 * 0.05)
+              job:coffeeshop_restart_rate:rate6h > (1 * 0.000278)
             )
           for: 1h
           labels:
             severity: warning
-            slo: latency
+            slo: stability
             service: coffeeshop
           annotations:
-            summary: "Coffeeshop latency SLO — warning slow burn"
+            summary: "Coffeeshop stability SLO — warning slow burn"
             description: >-
-              {{ $value | humanizePercentage }} of requests exceeded 500 ms
-              over the last 3 days.  The p95 latency SLO may be missed by
-              end of the 28-day window.
-            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-latency.md"
+              The coffeeshop container restart rate over the last 3 days
+              ({{ $value | humanize }} restarts/second) exceeds the SLO
+              threshold. Investigate recurring restarts before the error
+              budget is exhausted.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/demo-slo-ops.md"

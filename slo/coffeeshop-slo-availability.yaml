@@ -1,12 +1,19 @@
 ---
-# SLI/SLO — Availability
+# SLI/SLO — Availability (pod readiness)
 #
 # SLI definition:
-#   The proportion of HTTP requests to the coffeeshop service that are
-#   considered "good" (HTTP status code is not 5xx).
+#   The fraction of time the coffeeshop pods are in the Ready state.
+#   A pod is "good" when kube_pod_status_ready{condition="true"} == 1.
+#   The error ratio is the fraction of pods that are NOT ready over a
+#   given time window, computed using avg_over_time on the readiness gauge.
 #
-# SLO target: 99.9 % of requests succeed over a 28-day rolling window.
-# Error budget: 0.1 % → ~40 minutes of permitted errors per 28 days.
+# SLO target: 99.9 % of scrape intervals have at least one ready pod
+#             over a 28-day rolling window.
+# Error budget: 0.1 % ≈ 40 minutes of permitted not-ready time per 28 days.
+#
+# Metric source: kube-state-metrics (always available — no ServiceMonitor
+# configuration required on the application side).
+# Selector:  namespace="coffeeshop-dev", pod=~"coffeeshop-.*"
 #
 # Multi-burn-rate alerting windows (Google SRE book, chapter 5):
 #
@@ -16,13 +23,10 @@
 #   critical   |  6.0 ×          | 30 m         | 6 h         | 5 % in 6 h
 #   warning    |  1.0 ×          | 6 h          | 3 d         | 10 % in 3 d
 #
-# Prerequisites:
-#   - OpenShift user workload monitoring enabled (cluster-monitoring-config
-#     ConfigMap with enableUserWorkload: true)
-#   - The coffeeshop application exposes Prometheus metrics on a /metrics
-#     endpoint scraped by a ServiceMonitor in the same namespace.
-#   - The application uses the standard http_requests_total counter with
-#     labels: {job="coffeeshop", code="<HTTP status>"}
+# To simulate a burn-rate alert for the demo:
+#   oc scale deployment coffeeshop --replicas=0 -n coffeeshop-dev
+# This makes all pods NotReady, driving the error ratio to 1.0 and
+# immediately triggering CoffeeshopAvailabilityCriticalFastBurn.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -36,56 +40,69 @@ spec:
   groups:
 
     # ── Recording rules ──────────────────────────────────────────────────────
-    # These compute the error ratio over multiple windows so that alerting
-    # expressions stay readable and evaluation is consistent.
+    # Each rule computes the not-ready ratio over a specific time window.
+    # avg_over_time on a 0/1 gauge gives the fraction of scrape intervals
+    # during which the pod was not ready.
 
     - name: coffeeshop.slo.availability:recordings
       interval: 30s
       rules:
 
-        # Fraction of failed requests over a 5-minute window
-        - record: job:coffeeshop_http_errors:ratio_rate5m
+        # Not-ready ratio over a 5-minute window
+        - record: job:coffeeshop_pod_notready:ratio_rate5m
           expr: |
-            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[5m]))
-            /
-            sum(rate(http_requests_total{job="coffeeshop"}[5m]))
+            1 - (
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*", condition="true"}[5m]))
+              /
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*"}[5m]))
+            )
 
-        # Fraction of failed requests over a 30-minute window
-        - record: job:coffeeshop_http_errors:ratio_rate30m
+        # Not-ready ratio over a 30-minute window
+        - record: job:coffeeshop_pod_notready:ratio_rate30m
           expr: |
-            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[30m]))
-            /
-            sum(rate(http_requests_total{job="coffeeshop"}[30m]))
+            1 - (
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*", condition="true"}[30m]))
+              /
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*"}[30m]))
+            )
 
-        # Fraction of failed requests over a 1-hour window
-        - record: job:coffeeshop_http_errors:ratio_rate1h
+        # Not-ready ratio over a 1-hour window
+        - record: job:coffeeshop_pod_notready:ratio_rate1h
           expr: |
-            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[1h]))
-            /
-            sum(rate(http_requests_total{job="coffeeshop"}[1h]))
+            1 - (
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*", condition="true"}[1h]))
+              /
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*"}[1h]))
+            )
 
-        # Fraction of failed requests over a 6-hour window
-        - record: job:coffeeshop_http_errors:ratio_rate6h
+        # Not-ready ratio over a 6-hour window
+        - record: job:coffeeshop_pod_notready:ratio_rate6h
           expr: |
-            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[6h]))
-            /
-            sum(rate(http_requests_total{job="coffeeshop"}[6h]))
+            1 - (
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*", condition="true"}[6h]))
+              /
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*"}[6h]))
+            )
 
-        # Fraction of failed requests over a 3-day window
-        - record: job:coffeeshop_http_errors:ratio_rate3d
+        # Not-ready ratio over a 3-day window
+        - record: job:coffeeshop_pod_notready:ratio_rate3d
           expr: |
-            sum(rate(http_requests_total{job="coffeeshop", code=~"5.."}[3d]))
-            /
-            sum(rate(http_requests_total{job="coffeeshop"}[3d]))
+            1 - (
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*", condition="true"}[3d]))
+              /
+              sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*"}[3d]))
+            )
 
-        # Remaining error budget as a fraction (1 = full budget, 0 = exhausted)
-        # SLO objective = 0.999 → error budget threshold = 0.001
+        # Remaining error budget as a fraction (1 = full, 0 = exhausted).
+        # SLO objective = 0.999 → error budget threshold = 0.001.
         - record: job:coffeeshop_availability_slo:error_budget_remaining
           expr: |
             1 - (
-              sum(increase(http_requests_total{job="coffeeshop", code=~"5.."}[28d]))
-              /
-              sum(increase(http_requests_total{job="coffeeshop"}[28d]))
+              1 - (
+                sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*", condition="true"}[28d]))
+                /
+                sum(avg_over_time(kube_pod_status_ready{namespace="coffeeshop-dev", pod=~"coffeeshop-.*"}[28d]))
+              )
             ) / 0.001
 
     # ── Alerting rules ───────────────────────────────────────────────────────
@@ -94,16 +111,14 @@ spec:
       rules:
 
         # ── Critical: fast burn (page now) ───────────────────────────────────
-        # The service is burning through its error budget at 14.4× the
-        # sustainable rate.  If sustained it will exhaust 2 % of the monthly
-        # budget in just 1 hour.  Requires both the 5-minute and 1-hour
-        # windows to be elevated to avoid false positives from transient spikes.
+        # Pods have been not-ready at 14.4× the sustainable rate.
+        # At this pace 2 % of the monthly error budget is consumed in 1 hour.
         - alert: CoffeeshopAvailabilityCriticalFastBurn
           expr: |
             (
-              job:coffeeshop_http_errors:ratio_rate1h  > (14.4 * 0.001)
+              job:coffeeshop_pod_notready:ratio_rate1h  > (14.4 * 0.001)
               and
-              job:coffeeshop_http_errors:ratio_rate5m  > (14.4 * 0.001)
+              job:coffeeshop_pod_notready:ratio_rate5m  > (14.4 * 0.001)
             )
           for: 2m
           labels:
@@ -113,20 +128,19 @@ spec:
           annotations:
             summary: "Coffeeshop availability SLO — critical fast burn"
             description: >-
-              The error rate is {{ $value | humanizePercentage }} over the last
-              hour (budget threshold: 1.44 %).  At this rate 2 % of the 28-day
-              error budget will be consumed within 1 hour.
-            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-availability.md"
+              {{ $value | humanizePercentage }} of pod scrape intervals recorded
+              pods as NotReady over the last hour (budget threshold: 1.44 %).
+              At this rate 2 % of the 28-day error budget will be consumed
+              within 1 hour.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/demo-slo-ops.md"
 
         # ── Critical: slow burn (page soon) ──────────────────────────────────
-        # The service is burning through its error budget at 6× the sustainable
-        # rate.  If sustained it will exhaust 5 % of the monthly budget in 6 h.
         - alert: CoffeeshopAvailabilityCriticalSlowBurn
           expr: |
             (
-              job:coffeeshop_http_errors:ratio_rate6h  > (6 * 0.001)
+              job:coffeeshop_pod_notready:ratio_rate6h  > (6 * 0.001)
               and
-              job:coffeeshop_http_errors:ratio_rate30m > (6 * 0.001)
+              job:coffeeshop_pod_notready:ratio_rate30m > (6 * 0.001)
             )
           for: 15m
           labels:
@@ -136,21 +150,19 @@ spec:
           annotations:
             summary: "Coffeeshop availability SLO — critical slow burn"
             description: >-
-              The error rate is {{ $value | humanizePercentage }} over the last
-              6 hours (budget threshold: 0.6 %).  At this rate 5 % of the 28-day
-              error budget will be consumed within 6 hours.
-            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-availability.md"
+              {{ $value | humanizePercentage }} of pod scrape intervals recorded
+              pods as NotReady over the last 6 hours (budget threshold: 0.6 %).
+              At this rate 5 % of the 28-day error budget will be consumed
+              within 6 hours.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/demo-slo-ops.md"
 
-        # ── Warning: very slow burn (create ticket) ───────────────────────────
-        # The service is burning through its error budget at the sustainable
-        # rate or slightly above.  No immediate action needed but this should
-        # be tracked.
+        # ── Warning: slow burn (create ticket) ───────────────────────────────
         - alert: CoffeeshopAvailabilityWarningSlowBurn
           expr: |
             (
-              job:coffeeshop_http_errors:ratio_rate3d > (1 * 0.001)
+              job:coffeeshop_pod_notready:ratio_rate3d > (1 * 0.001)
               and
-              job:coffeeshop_http_errors:ratio_rate6h > (1 * 0.001)
+              job:coffeeshop_pod_notready:ratio_rate6h > (1 * 0.001)
             )
           for: 1h
           labels:
@@ -160,10 +172,11 @@ spec:
           annotations:
             summary: "Coffeeshop availability SLO — warning slow burn"
             description: >-
-              The error rate is {{ $value | humanizePercentage }} over the last
-              3 days (budget threshold: 0.1 %).  At this rate the error budget
-              will be exhausted within the 28-day window.
-            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/runbooks/coffeeshop-availability.md"
+              {{ $value | humanizePercentage }} of pod scrape intervals recorded
+              pods as NotReady over the last 3 days (budget threshold: 0.1 %).
+              At this rate the error budget will be exhausted by end of the
+              28-day window.
+            runbook_url: "https://github.com/froberge/acm_hcp_argocd_demo/blob/main/docs/demo-slo-ops.md"
 
         # ── Info: error budget low ────────────────────────────────────────────
         - alert: CoffeeshopAvailabilityErrorBudgetLow
@@ -177,5 +190,5 @@ spec:
             summary: "Coffeeshop availability SLO — error budget below 25 %"
             description: >-
               Only {{ $value | humanizePercentage }} of the 28-day error budget
-              remains.  Review recent incidents and consider a freeze on
-              risky changes.
+              remains. Review recent incidents and consider a freeze on
+              risky deployments.
