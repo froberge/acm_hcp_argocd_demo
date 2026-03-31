@@ -1,22 +1,23 @@
 ---
-# Argo CD Application — SLO Grafana dashboard and metrics allowlist (hub)
+# Argo CD Application — Grafana Community Operator + SLO dashboard (coffeeshop spoke)
 #
-# Deploys two ConfigMaps to the hub cluster's
-# open-cluster-management-observability namespace:
+# Deploys the following resources to the coffeeshop cluster (namespace: grafana-slo):
 #
-#   1. observability-metrics-custom-allowlist
-#      Tells the ACM metrics collector on each spoke to forward the
-#      coffeeshop SLO recording-rule time series to the hub Thanos store.
-#      Without this, custom recording rules stay local to the spoke and
-#      are not visible in the hub Grafana.
+#   1. Namespace grafana-slo
+#   2. OperatorGroup + Subscription — installs the Grafana Community Operator v5
+#      from the OpenShift community-operators catalog via OLM.
+#   3. ServiceAccount + ClusterRoleBinding (cluster-monitoring-view) — allows
+#      Grafana to authenticate to the cluster's Thanos Querier.
+#   4. Grafana CR — deploys the Grafana pod with a projected SA token volume.
+#   5. GrafanaDataSource CR — connects Grafana to Thanos Querier using the
+#      projected token (no static secrets in Git).
+#   6. GrafanaDashboard CR — the 9-panel SLO dashboard, loaded automatically.
 #
-#   2. grafana-dashboard-coffeeshop-slo
-#      ConfigMap labelled grafana-custom-dashboard: "true" that ACM
-#      Observability's Grafana sidecar hot-loads as a dashboard.
+# Resources are applied in Argo CD sync waves (0 → operator, 1 → instance/RBAC,
+# 2 → datasource/dashboard) to respect OLM CRD registration timing.
 #
-# This Application targets the hub cluster itself (in-cluster), not a spoke.
-# The hub's Argo CD instance (openshift-gitops) has in-cluster access and
-# can deploy directly to the hub without going through ACM GitOpsCluster.
+# Access the dashboard after deployment:
+#   oc get route -n grafana-slo   # on the coffeeshop cluster
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -32,12 +33,15 @@ spec:
     targetRevision: main
     path: grafana
   destination:
-    # Deploy to the hub cluster itself.
-    server: https://kubernetes.default.svc
-    namespace: open-cluster-management-observability
+    # Deploy to the coffeeshop spoke cluster.  The Grafana operator, instance,
+    # datasource, and dashboard all run on the same cluster as the SLO
+    # PrometheusRules, so Thanos Querier access is purely in-cluster.
+    name: coffeeshop
+    namespace: grafana-slo
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
+      - CreateNamespace=true
       - RespectIgnoreDifferences=true

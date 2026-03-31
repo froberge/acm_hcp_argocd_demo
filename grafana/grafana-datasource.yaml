@@ -1,0 +1,43 @@
+---
+# GrafanaDataSource — connects this Grafana instance to the cluster's
+# Thanos Querier (openshift-monitoring).
+#
+# Authentication: the Thanos Querier on OpenShift requires a Bearer token.
+# bearerTokenFile points to the projected SA token mounted in the Grafana
+# pod by grafana-instance.yaml — no static secret is stored in Git.
+#
+# TLS: tlsSkipVerify is true because the Thanos Querier uses a
+# cluster-internal certificate signed by the OpenShift internal CA.
+# For production, configure the CA bundle instead.
+#
+# The instanceSelector label dashboards: coffeeshop binds this datasource
+# to the coffeeshop-grafana Grafana instance only.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDataSource
+metadata:
+  name: thanos-querier
+  namespace: grafana-slo
+  labels:
+    app.kubernetes.io/part-of: coffeeshop
+    app.kubernetes.io/component: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "coffeeshop"
+  datasource:
+    name: Thanos
+    type: prometheus
+    access: proxy
+    # Internal Thanos Querier endpoint — port 9091 requires Bearer token auth.
+    # Port 9092 (web) requires oauth-proxy; 9091 is the simpler choice for GitOps.
+    url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "30s"
+      tlsSkipVerify: true
+      httpMethod: GET
+    # bearerTokenFile must match the mountPath set in grafana-instance.yaml
+    bearerTokenFile: /var/run/secrets/tokens/grafana-token

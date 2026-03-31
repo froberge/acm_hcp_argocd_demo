@@ -1,0 +1,36 @@
+---
+# ServiceAccount used by the Grafana deployment pod.
+# A projected token from this SA is mounted into the pod and used as the
+# Bearer token when querying the Thanos Querier in openshift-monitoring.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana-serviceaccount
+  namespace: grafana-slo
+  labels:
+    app.kubernetes.io/part-of: coffeeshop
+    app.kubernetes.io/component: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+---
+# Grant the SA read access to all metrics via the Thanos Querier.
+# cluster-monitoring-view is a built-in OpenShift ClusterRole that allows
+# GET requests to the monitoring APIs — sufficient for Grafana datasource
+# queries but grants no write or admin privileges.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: grafana-slo-cluster-monitoring-view
+  labels:
+    app.kubernetes.io/part-of: coffeeshop
+    app.kubernetes.io/component: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-monitoring-view
+subjects:
+  - kind: ServiceAccount
+    name: grafana-serviceaccount
+    namespace: grafana-slo
