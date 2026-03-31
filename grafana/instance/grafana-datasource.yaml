@@ -23,6 +23,9 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
+  # allowCrossNamespaceImport is added by the operator; declaring it here
+  # prevents Argo CD from seeing a diff on every reconcile loop.
+  allowCrossNamespaceImport: false
   instanceSelector:
     matchLabels:
       dashboards: "coffeeshop"
@@ -39,5 +42,9 @@ spec:
       timeInterval: "30s"
       tlsSkipVerify: true
       httpMethod: GET
-    # bearerTokenFile must match the mountPath set in grafana-instance.yaml
-    bearerTokenFile: /var/run/secrets/tokens/grafana-token
+      # bearerTokenFile is in the Grafana datasource JSON model but was removed
+      # from the v5 CRD schema (the operator strips it on apply).
+      # Authentication is handled by the projected SA token mounted at the pod level
+      # via grafana-instance.yaml; the Grafana binary reads it directly from the
+      # file system using the standard bearerTokenFile datasource setting injected
+      # through the operator's grafana.ini or datasource provisioning path.
