@@ -47,7 +47,9 @@ spec:
     type: prometheus
     access: proxy
     # Internal Thanos Querier endpoint — port 9091 requires Bearer token auth.
-    url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
+    # Port 9092 = kube-rbac-proxy — accepts SA Bearer tokens with cluster-monitoring-view.
+    # Port 9091 = oauth-proxy — requires an OpenShift user OAuth token (browser session).
+    url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9092
     isDefault: true
     editable: false
     jsonData:
