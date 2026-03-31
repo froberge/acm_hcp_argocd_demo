@@ -35,6 +35,10 @@ spec:
   config:
     auth:
       disable_login_form: "false"
+    auth.basic:
+      # Grafana 12 disables basic auth by default; the Grafana Operator v5
+      # authenticates via basic auth to manage datasources and dashboards.
+      enabled: "true"
     auth.anonymous:
       enabled: "true"
       org_name: Main Org.
