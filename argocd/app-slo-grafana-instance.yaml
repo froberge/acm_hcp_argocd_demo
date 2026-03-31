@@ -1,10 +1,16 @@
 ---
-# Argo CD Application — Phase 2: Grafana instance, datasource, and dashboard (coffeeshop spoke)
+# Argo CD Application — Phase 2: Grafana instance and dashboard (coffeeshop spoke)
 #
-# Deploys the Grafana Custom Resources to the coffeeshop cluster:
-#   - Grafana CR (pod with projected SA token volume for Thanos Bearer auth)
-#   - GrafanaDataSource CR (connects to Thanos Querier in openshift-monitoring)
+# Deploys:
+#   - ConfigMap with file-based datasource provisioning (Thanos Querier, port 9091)
+#   - Grafana CR (with BEARER_TOKEN env var injected from Secret + datasource ConfigMap mount)
 #   - GrafanaDashboard CR (9-panel SLO dashboard loaded automatically by the operator)
+#   - OpenShift Route to expose the Grafana UI
+#
+# Datasource strategy: file-based provisioning (not GrafanaDatasource CR).
+#   The GrafanaDatasource CR mechanism requires the Grafana Operator to have
+#   datasources:write permission in Grafana 12+, which was unreliable.
+#   File-based provisioning loads at pod startup and is not affected by RBAC.
 #
 # IMPORTANT — deployment order:
 #   This application depends on app-slo-grafana-operator being Synced/Healthy first.
@@ -31,19 +37,10 @@ spec:
   destination:
     name: coffeeshop
     namespace: grafana-slo
-  # The Grafana Community Operator v5 (field manager "v5") may add or modify
-  # fields on GrafanaDatasource after apply (e.g. status annotations, internal
-  # fields).  Ignoring its managed fields prevents spurious OutOfSync cycles.
-  ignoreDifferences:
-    - group: grafana.integreatly.org
-      kind: GrafanaDatasource
-      managedFieldsManagers:
-        - v5
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - RespectIgnoreDifferences=true
       - SkipDryRunOnMissingResource=true
       - ServerSideApply=true

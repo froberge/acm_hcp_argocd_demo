@@ -1,0 +1,42 @@
+---
+# File-based Grafana datasource provisioning for Thanos Querier.
+#
+# This ConfigMap is mounted at /etc/grafana/provisioning/datasources/ inside
+# the Grafana pod.  Grafana loads it on startup and supports environment
+# variable interpolation ($VAR or ${VAR}) in provisioning files.
+#
+# The $BEARER_TOKEN variable is injected from the grafana-thanos-token Secret
+# via the container env spec in grafana-instance.yaml.
+#
+# This approach bypasses the GrafanaDatasource CR / Grafana Operator API path
+# entirely, which is unreliable against Grafana 12's stricter RBAC.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource-config
+  namespace: grafana-slo
+  labels:
+    app.kubernetes.io/part-of: coffeeshop
+    app.kubernetes.io/component: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+data:
+  thanos.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Thanos
+        type: prometheus
+        access: proxy
+        uid: thanos-querier
+        url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091
+        isDefault: true
+        editable: false
+        jsonData:
+          tlsSkipVerify: true
+          timeInterval: "30s"
+          httpMethod: GET
+          httpHeaderName1: "Authorization"
+        secureJsonData:
+          # $BEARER_TOKEN is expanded from the container env var at pod startup.
+          # The Secret stores the value as "Bearer <token>" (with prefix).
+          httpHeaderValue1: "$BEARER_TOKEN"

@@ -55,17 +55,18 @@ spec:
         spec:
           serviceAccountName: grafana-serviceaccount
           volumes:
-            - name: grafana-token
-              projected:
-                sources:
-                  - serviceAccountToken:
-                      path: grafana-token
-                      # audience must match the Thanos Querier's expected audience
-                      audience: openshift
-                      expirationSeconds: 3600
+            - name: grafana-datasources
+              configMap:
+                name: grafana-datasource-config
           containers:
             - name: grafana
+              env:
+                - name: BEARER_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-thanos-token
+                      key: token
               volumeMounts:
-                - name: grafana-token
-                  mountPath: /var/run/secrets/tokens
+                - name: grafana-datasources
+                  mountPath: /etc/grafana/provisioning/datasources
                   readOnly: true
