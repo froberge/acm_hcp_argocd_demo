@@ -31,6 +31,17 @@ spec:
   destination:
     name: coffeeshop
     namespace: grafana-slo
+  # Grafana Community Operator v5 modifies GrafanaDatasource after apply:
+  #   - adds allowCrossNamespaceImport (managed under field manager "v5")
+  #   - drops bearerTokenFile (not in the v5 CRD schema)
+  # Both cause perpetual OutOfSync without these ignoreDifferences rules.
+  ignoreDifferences:
+    - group: grafana.integreatly.org
+      kind: GrafanaDatasource
+      managedFieldsManagers:
+        - v5
+      jsonPointers:
+        - /spec/datasource/bearerTokenFile
   syncPolicy:
     automated:
       prune: true
