@@ -17,4 +17,5 @@ resources:
   - applicationset.yaml
   - app-acm-policies.yaml
   - app-slo-coffeeshop.yaml
-  - app-slo-grafana.yaml
+  - app-slo-grafana-operator.yaml
+  - app-slo-grafana-instance.yaml

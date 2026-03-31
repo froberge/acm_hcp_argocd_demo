@@ -1,0 +1,355 @@
+---
+# GrafanaDashboard — the Grafana operator sidecar loads this JSON as a
+# dashboard into the coffeeshop-grafana instance automatically.
+#
+# Panels:
+#   Row 1 (full width): Pod readiness over time (time series)
+#   Row 2: Not-ready ratio 5m | Not-ready ratio 1h | Error budget gauge | Active alerts count
+#   Row 3: Restart rate 5m | Restart rate 1h | Restarts in 28d | Firing alerts table
+#
+# The instanceSelector label dashboards: coffeeshop binds this dashboard
+# to the coffeeshop-grafana Grafana instance.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: coffeeshop-slo
+  namespace: grafana-slo
+  labels:
+    app.kubernetes.io/part-of: coffeeshop
+    app.kubernetes.io/component: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "coffeeshop"
+  resyncPeriod: 10m
+  json: |
+    {
+      "annotations": { "list": [] },
+      "description": "SLI/SLO dashboard for the coffeeshop application — availability (pod readiness) and stability (container restart rate)",
+      "editable": false,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "id": 1,
+          "title": "Pod Readiness — coffeeshop-dev",
+          "description": "1 = pod Ready, 0 = pod NotReady. All pods should stay at 1 during normal operation.",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false },
+              "min": 0,
+              "max": 1,
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red",   "value": null },
+                  { "color": "green", "value": 1 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "kube_pod_status_ready{namespace=\"coffeeshop-dev\", pod=~\"coffeeshop-.*\", condition=\"true\"}",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Not-Ready Ratio (5 min)",
+          "description": "Fraction of pod scrape intervals with NotReady status over the last 5 minutes. SLO target: < 0.001.",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 5, "w": 6, "x": 0, "y": 8 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 4,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green",  "value": null },
+                  { "color": "yellow", "value": 0.0006 },
+                  { "color": "red",    "value": 0.001 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "colorMode": "background"
+          },
+          "targets": [
+            {
+              "expr": "job:coffeeshop_pod_notready:ratio_rate5m",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Not-Ready Ratio (1 hour)",
+          "description": "Fraction of pod scrape intervals with NotReady status over the last hour.",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 5, "w": 6, "x": 6, "y": 8 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 4,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green",  "value": null },
+                  { "color": "yellow", "value": 0.0006 },
+                  { "color": "red",    "value": 0.001 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "colorMode": "background"
+          },
+          "targets": [
+            {
+              "expr": "job:coffeeshop_pod_notready:ratio_rate1h",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Availability Error Budget Remaining",
+          "description": "Fraction of the 28-day error budget still available. 1.0 = full, 0.0 = exhausted. SLO objective: 99.9%.",
+          "type": "gauge",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 5, "w": 6, "x": 12, "y": 8 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 2,
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red",    "value": null },
+                  { "color": "yellow", "value": 0.25 },
+                  { "color": "green",  "value": 0.5 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "showThresholdMarkers": true
+          },
+          "targets": [
+            {
+              "expr": "job:coffeeshop_availability_slo:error_budget_remaining",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Active SLO Alerts",
+          "description": "Count of currently firing SLO alerts for coffeeshop. Green = 0 (healthy).",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 5, "w": 6, "x": 18, "y": 8 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red",   "value": 1 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["count"] },
+            "colorMode": "background"
+          },
+          "targets": [
+            {
+              "expr": "ALERTS{service=\"coffeeshop\", alertstate=\"firing\"}",
+              "legendFormat": "{{alertname}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Container Restart Rate (5 min)",
+          "description": "Restarts/second over the last 5 min. SLO threshold: 0 (any restart is notable for a demo).",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 5, "w": 6, "x": 0, "y": 13 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "decimals": 6,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green",  "value": null },
+                  { "color": "yellow", "value": 0.000278 },
+                  { "color": "red",    "value": 0.001668 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "colorMode": "background"
+          },
+          "targets": [
+            {
+              "expr": "job:coffeeshop_restart_rate:rate5m",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Container Restart Rate (1 hour)",
+          "description": "Restarts/second over the last hour.",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 5, "w": 6, "x": 6, "y": 13 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "decimals": 6,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green",  "value": null },
+                  { "color": "yellow", "value": 0.000278 },
+                  { "color": "red",    "value": 0.001668 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "colorMode": "background"
+          },
+          "targets": [
+            {
+              "expr": "job:coffeeshop_restart_rate:rate1h",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "Restarts in Last 28 Days",
+          "description": "Total container restarts in the current 28-day SLO window. SLO budget: 672.",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 5, "w": 6, "x": 12, "y": 13 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green",  "value": null },
+                  { "color": "yellow", "value": 336 },
+                  { "color": "red",    "value": 672 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "colorMode": "background"
+          },
+          "targets": [
+            {
+              "expr": "job:coffeeshop_restart_count:increase28d",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "title": "Firing SLO Alerts Detail",
+          "description": "Table of all currently firing SLO alerts for coffeeshop.",
+          "type": "table",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 5, "w": 6, "x": 18, "y": 13 },
+          "fieldConfig": {
+            "defaults": { "custom": { "align": "auto" } }
+          },
+          "options": { "showHeader": true },
+          "transformations": [
+            { "id": "labelsToFields", "options": { "valueLabel": "alertname" } },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true, "Value": true, "__name__": true, "alertstate": true, "service": true },
+                "renameByName": { "alertname": "Alert", "severity": "Severity", "slo": "SLO" }
+              }
+            }
+          ],
+          "targets": [
+            {
+              "expr": "ALERTS{service=\"coffeeshop\", alertstate=\"firing\"}",
+              "instant": true,
+              "refId": "A"
+            }
+          ]
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 36,
+      "tags": ["slo", "coffeeshop"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "label": "Data Source",
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          }
+        ]
+      },
+      "time": { "from": "now-3h", "to": "now" },
+      "timezone": "browser",
+      "title": "Coffeeshop SLO Dashboard",
+      "uid": "coffeeshop-slo-v1",
+      "version": 1
+    }

@@ -1,0 +1,40 @@
+---
+# Argo CD Application — Phase 2: Grafana instance, datasource, and dashboard (coffeeshop spoke)
+#
+# Deploys the Grafana Custom Resources to the coffeeshop cluster:
+#   - Grafana CR (pod with projected SA token volume for Thanos Bearer auth)
+#   - GrafanaDataSource CR (connects to Thanos Querier in openshift-monitoring)
+#   - GrafanaDashboard CR (9-panel SLO dashboard loaded automatically by the operator)
+#
+# IMPORTANT — deployment order:
+#   This application depends on app-slo-grafana-operator being Synced/Healthy first.
+#   OLM takes ~2-3 minutes to register the grafana.integreatly.org CRDs after the
+#   Subscription is created.  SkipDryRunOnMissingResource=true prevents a dry-run
+#   validation failure from blocking the sync while CRDs are still registering.
+#
+# After deployment:
+#   oc get route -n grafana-slo   # on the coffeeshop cluster — open the Grafana URL
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: slo-grafana-instance
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: coffeeshop
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/froberge/acm_hcp_argocd_demo
+    targetRevision: main
+    path: grafana/instance
+  destination:
+    name: coffeeshop
+    namespace: grafana-slo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - RespectIgnoreDifferences=true
+      - SkipDryRunOnMissingResource=true
