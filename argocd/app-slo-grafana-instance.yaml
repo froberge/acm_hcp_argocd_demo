@@ -38,3 +38,4 @@ spec:
     syncOptions:
       - RespectIgnoreDifferences=true
       - SkipDryRunOnMissingResource=true
+      - ServerSideApply=true
