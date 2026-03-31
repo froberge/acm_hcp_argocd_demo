@@ -1,0 +1,103 @@
+---
+# ACM Policy: alertmanager-config
+#
+# ENFORCE on ALL clusters (hub + all spoke clusters).
+#
+# OpenShift fires the AlertmanagerReceiversNotConfigured warning when
+# Alertmanager has no receivers other than the default null/watchdog stub.
+# This policy pushes a minimal working configuration that:
+#   - routes every alert to a named "default" receiver (silences the warning)
+#   - isolates the always-firing Watchdog heartbeat to its own named receiver
+#   - adds standard severity-based inhibit rules (critical silences warning/info)
+#
+# The alertmanager-main Secret in openshift-monitoring is the canonical
+# configuration source for the platform Alertmanager on every OpenShift cluster.
+# Alertmanager picks up the change within ~30 seconds (no restart required).
+#
+# To add real notification channels (Slack, email, PagerDuty…) in the future,
+# add a receiver under `receivers:` and a route under `route.routes:`.
+#
+# Placement: all clusters (hub AND spokes — no local-cluster exclusion).
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: alertmanager-config
+  namespace: acm-policies
+  annotations:
+    policy.open-cluster-management.io/standards: NIST-CSF
+    policy.open-cluster-management.io/categories: DE.CM Security Continuous Monitoring
+    policy.open-cluster-management.io/controls: DE.CM-3 Personnel Activity Monitoring
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: alertmanager-receiver-config
+        spec:
+          remediationAction: enforce
+          severity: low
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Secret
+                metadata:
+                  name: alertmanager-main
+                  namespace: openshift-monitoring
+                stringData:
+                  alertmanager.yaml: |
+                    global:
+                      resolve_timeout: 5m
+                    route:
+                      group_by: ['alertname', 'namespace']
+                      group_wait: 30s
+                      group_interval: 5m
+                      repeat_interval: 12h
+                      receiver: default
+                      routes:
+                        - matchers:
+                            - alertname = Watchdog
+                          receiver: watchdog
+                    receivers:
+                      - name: default
+                      - name: watchdog
+                    inhibit_rules:
+                      - source_matchers:
+                          - severity = critical
+                        target_matchers:
+                          - severity =~ warning|info
+                        equal: [namespace, alertname]
+                      - source_matchers:
+                          - severity = warning
+                        target_matchers:
+                          - severity = info
+                        equal: [namespace, alertname]
+---
+# Placement: ALL clusters in the default ClusterSet — hub and all spokes.
+# (No local-cluster filter, so the hub is included alongside spoke clusters.)
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: alertmanager-config-placement
+  namespace: acm-policies
+spec:
+  clusterSets:
+    - default
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: alertmanager-config-binding
+  namespace: acm-policies
+placementRef:
+  name: alertmanager-config-placement
+  kind: Placement
+  apiGroup: cluster.open-cluster-management.io
+subjects:
+  - name: alertmanager-config
+    kind: Policy
+    apiGroup: policy.open-cluster-management.io
