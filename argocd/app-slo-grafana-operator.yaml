@@ -1,0 +1,37 @@
+---
+# Argo CD Application — Phase 1: Grafana Community Operator install (coffeeshop spoke)
+#
+# Deploys only the OLM resources to the coffeeshop cluster:
+#   - Namespace grafana-slo
+#   - OperatorGroup (single-namespace, scoped to grafana-slo)
+#   - Subscription (Grafana Community Operator v5 from community-operators catalog)
+#   - ServiceAccount + ClusterRoleBinding (cluster-monitoring-view for Thanos access)
+#
+# This application must reach Synced/Healthy before app-slo-grafana-instance is
+# synced, because OLM needs ~2-3 minutes to register the Grafana CRDs after the
+# Subscription is created.  app-slo-grafana-instance carries
+# SkipDryRunOnMissingResource=true to tolerate a brief CRD-unavailability window.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: slo-grafana-operator
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: coffeeshop
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/froberge/acm_hcp_argocd_demo
+    targetRevision: main
+    path: grafana/operator
+  destination:
+    name: coffeeshop
+    namespace: grafana-slo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
