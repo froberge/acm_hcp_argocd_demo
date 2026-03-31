@@ -1,0 +1,32 @@
+---
+# ArgoCD instance deployed on the coffeeshop spoke cluster in the
+# coffeeshop-gitops namespace.  This gives the coffeeshop team a
+# dedicated Argo CD instance isolated from the hub's openshift-gitops
+# instance.
+#
+# IMPORTANT — OutOfSync behaviour:
+#   The OpenShift GitOps operator mutates this CR after creation by
+#   injecting default values for many spec sub-fields (dex, grafana,
+#   prometheus, redis, server, sso, notifications, applicationSet …).
+#   Those injected fields cause Argo CD on the hub to permanently
+#   report OutOfSync.  The companion Application
+#   (argocd/app-coffeeshop-gitops-argocd.yaml) suppresses the false
+#   positives via ignoreDifferences.
+apiVersion: argoproj.io/v1alpha1
+kind: ArgoCD
+metadata:
+  name: argocd
+  namespace: coffeeshop-gitops
+spec:
+  server:
+    route:
+      enabled: true
+  rbac:
+    defaultPolicy: role:readonly
+    policy: |
+      g, system:cluster-admins, role:admin
+    scopes: "[groups]"
+  sso:
+    provider: dex
+    dex:
+      openShiftOAuth: true
