@@ -414,16 +414,20 @@ watch -n 5 'oc -n openshift-user-workload-monitoring exec \
 oc scale deployment coffeeshop --replicas=1 -n coffeeshop
 ```
 
-#### Step 5 — Observe across clusters via ACM Observability
+#### Step 5 — Observe across clusters via ACM Observability (optional)
 
-ACM Observability (MultiClusterObservability operator) aggregates metrics from all managed clusters into a central Thanos instance on the hub. Once the add-on is active, you can query the SLI metrics from all clusters in a single Grafana instance.
+ACM Observability (MultiClusterObservability operator) is an **optional** component that aggregates metrics from all managed clusters into a central Thanos instance on the hub. **This demo does not install MCO.** If MCO is already active in your environment, you can use the commands below to verify the add-on and open the cross-cluster Grafana; otherwise skip directly to Step 6.
+
+> **Prerequisite — MCO is not installed by this demo.**
+> To enable cross-cluster Thanos/Grafana, install the MultiClusterObservability operator and create a `MultiClusterObservability` CR on the hub first.
+> See the [ACM Observability documentation](https://access.redhat.com/documentation/en-us/red_hat_advanced_cluster_management_for_kubernetes) for setup instructions.
 
 ```bash
-# Check that the observability add-on is active on the coffeeshop cluster
+# Check that the observability add-on is active on the coffeeshop cluster (requires MCO)
 oc get managedclusteraddon observability-controller \
   -n coffeeshop
 
-# Open the ACM Grafana dashboard (hub cluster)
+# Open the ACM Grafana dashboard (hub cluster — requires MCO operator installed)
 oc get route grafana -n open-cluster-management-observability -o jsonpath='{.spec.host}'
 ```
 
@@ -670,7 +674,7 @@ oc -n openshift-user-workload-monitoring exec \
   -c prometheus -- \
   curl -s 'http://localhost:9090/api/v1/alerts' | python3 -m json.tool
 
-# Get the ACM Observability Grafana URL (hub cluster)
+# Get the ACM Observability Grafana URL (hub cluster — requires MCO operator installed)
 oc get route grafana -n open-cluster-management-observability \
   -o jsonpath='https://{.spec.host}\n'
 
