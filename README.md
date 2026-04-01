@@ -50,7 +50,8 @@ flowchart TD
 ```
 acm_hcp_argocd_demo/
 ├── README.md
-├── acm-policies/                           # ACM Policies applied to spoke clusters
+├── acm-policies/                           # ACM Policies applied to hub and/or spoke clusters
+│   ├── alertmanager-config-policy.yaml     # Configures Alertmanager receivers on ALL clusters (hub + spokes)
 │   ├── openshift-gitops-policy.yaml        # Installs OpenShift GitOps operator on spokes
 │   ├── openshift-pipelines-policy.yaml     # Installs OpenShift Pipelines operator on spokes
 │   └── slo-observability-policy.yaml       # Policy 1 (enforce, all spokes): user workload monitoring + namespace
@@ -68,6 +69,8 @@ acm_hcp_argocd_demo/
 │   ├── acm-placement-configmap.yaml        # Teaches ApplicationSet to read PlacementDecisions
 │   ├── app-acm-policies.yaml               # Argo CD Application syncing acm-policies/
 │   ├── app-slo-coffeeshop.yaml             # Argo CD Application deploying slo/ to coffeeshop cluster
+│   ├── app-slo-grafana-operator.yaml       # Argo CD Application — Phase 1: Grafana Community Operator install
+│   ├── app-slo-grafana-instance.yaml       # Argo CD Application — Phase 2: Grafana instance + SLO dashboard
 │   ├── appproject.yaml                     # AppProject scoping HyperShift resource kinds
 │   ├── applicationset.yaml                 # ApplicationSet deploying hcp/ to local-cluster
 │   ├── argocd-acm-policy-rbac.yaml         # RBAC: Argo CD SA → ACM policy/placement kinds
@@ -87,11 +90,24 @@ acm_hcp_argocd_demo/
 │   └── nodePool_coffeeshop.yaml            # NodePool: coffeeshop
 ├── docs/
 │   └── demo-slo-ops.md                     # Step-by-step SLI/SLO Ops demo script with talking points
-└── slo/                                    # SLI/SLO definitions — deployed to spoke clusters
-    ├── kustomization.yaml                  # Kustomize entry point
-    ├── namespace.yaml                      # coffeeshop application namespace
-    ├── coffeeshop-slo-availability.yaml    # PrometheusRule: 99.9 % availability SLO
-    └── coffeeshop-slo-latency.yaml         # PrometheusRule: 95 % p95 ≤ 500 ms latency SLO
+├── slo/                                    # SLI/SLO definitions — deployed to spoke clusters
+│   ├── kustomization.yaml                  # Kustomize entry point
+│   ├── namespace.yaml                      # coffeeshop application namespace
+│   ├── coffeeshop-slo-availability.yaml    # PrometheusRule: 99.9 % availability SLO
+│   └── coffeeshop-slo-latency.yaml         # PrometheusRule: 95 % p95 ≤ 500 ms latency SLO
+└── grafana/                                # Grafana deployment — deployed to spoke clusters
+    ├── operator/                           # Phase 1: OLM install of Grafana Community Operator
+    │   ├── kustomization.yaml
+    │   ├── grafana-namespace.yaml          # Namespace: grafana-slo
+    │   ├── grafana-operatorgroup.yaml      # OperatorGroup scoped to grafana-slo
+    │   ├── grafana-subscription.yaml       # OLM Subscription: Grafana Community Operator v5
+    │   └── grafana-rbac.yaml              # SA + ClusterRoleBinding for Thanos Querier access
+    └── instance/                           # Phase 2: Grafana CR, dashboard, and route
+        ├── kustomization.yaml
+        ├── grafana-datasource-config.yaml  # ConfigMap: file-based Thanos datasource provisioning
+        ├── grafana-instance.yaml           # Grafana CR (BEARER_TOKEN injected from Secret)
+        ├── grafana-dashboard.yaml          # GrafanaDashboard CR: 9-panel SLO dashboard
+        └── grafana-route.yaml             # OpenShift Route exposing the Grafana UI
 ```
 
 ## Prerequisites
@@ -137,10 +153,15 @@ Resources are applied in the following order by the Kustomization:
 4. `argocd-acm-policy-rbac.yaml` — grants the application controller SA access to ACM policy, placement, and `ManagedClusterSetBinding` kinds
 5. `managedclustersetbinding.yaml` — binds the `default` ManagedClusterSet into the `openshift-gitops` namespace
 6. `placement.yaml` — ACM Placement selecting the hub cluster (`local-cluster: "true"`)
-7. `gitopscluster.yaml` — ACM `GitOpsCluster` that registers the selected clusters with Argo CD
-8. `appproject.yaml` — Argo CD `AppProject` (`hcp-project`) whitelisting `HostedCluster` and `NodePool` kinds
-9. `applicationset.yaml` — Argo CD `ApplicationSet` that generates an Application from the placement result and syncs `hcp/`
-10. `app-acm-policies.yaml` — standalone Argo CD `Application` syncing `acm-policies/` to the hub
+7. `gitopscluster.yaml` — ACM `GitOpsCluster` that registers the hub with Argo CD
+8. `spoke-placement.yaml` — ACM Placement selecting all spoke clusters (non-hub ManagedClusters)
+9. `spoke-gitopscluster.yaml` — ACM `GitOpsCluster` that registers spoke clusters as Argo CD destinations
+10. `appproject.yaml` — Argo CD `AppProject` (`hcp-project`) whitelisting `HostedCluster` and `NodePool` kinds
+11. `applicationset.yaml` — Argo CD `ApplicationSet` that generates an Application from the placement result and syncs `hcp/`
+12. `app-acm-policies.yaml` — standalone Argo CD `Application` syncing `acm-policies/` to the hub
+13. `app-slo-coffeeshop.yaml` — Argo CD `Application` deploying SLO `PrometheusRule` objects to the coffeeshop cluster
+14. `app-slo-grafana-operator.yaml` — Argo CD `Application` (Phase 1) installing the Grafana Community Operator on the coffeeshop cluster via OLM; must reach `Synced/Healthy` before Phase 2
+15. `app-slo-grafana-instance.yaml` — Argo CD `Application` (Phase 2) deploying the Grafana instance and 9-panel SLO dashboard; uses `SkipDryRunOnMissingResource=true` to tolerate the ~2-3 minute CRD registration delay after Phase 1
 
 ### Step 2 — Argo CD reconciles the HCP manifests
 
@@ -162,14 +183,16 @@ See [Ansible Playbook](#ansible-playbook) in the commands section for the exact 
 
 ## ACM Policies
 
-### Operator installation policies (`acm-policies/`)
+### All ACM policies (`acm-policies/`)
 
-These policies are synced to the hub by Argo CD and then enforced by ACM on all **spoke clusters** in the `default` ManagedClusterSet (i.e. every cluster where `local-cluster != "true"`):
+All policies in this directory are synced to the hub by the `app-acm-policies` Argo CD Application and then enforced or evaluated by ACM across the appropriate clusters.
 
-| Policy | What it installs |
-|---|---|
-| `openshift-gitops-policy.yaml` | OpenShift GitOps (Argo CD) operator via Subscription in the `openshift-operators` namespace |
-| `openshift-pipelines-policy.yaml` | OpenShift Pipelines (Tekton) operator via Subscription in the `openshift-operators` namespace |
+| Policy file | Placement | Action | Purpose |
+|---|---|---|---|
+| `alertmanager-config-policy.yaml` | All clusters (hub + spokes) | enforce | Configures Alertmanager receivers and inhibit rules; silences the `AlertmanagerReceiversNotConfigured` warning on every cluster |
+| `openshift-gitops-policy.yaml` | Spoke clusters only | enforce | Installs the OpenShift GitOps (Argo CD) operator via OLM Subscription in `openshift-operators` |
+| `openshift-pipelines-policy.yaml` | Spoke clusters only | enforce | Installs the OpenShift Pipelines (Tekton) operator via OLM Subscription in `openshift-operators` |
+| `slo-observability-policy.yaml` | See below | enforce / inform | Two sub-policies: `slo-infrastructure` (enforce, all spokes) enables user workload monitoring; `slo-verify-coffeeshop` (inform, coffeeshop only) raises a violation if SLO `PrometheusRule` objects are missing |
 
 ### Network security policy demo (`file_for_demo/`)
 
@@ -420,6 +443,34 @@ job:coffeeshop_latency_p95:rate5m
 ALERTS{slo=~"availability|latency", service="coffeeshop"}
 ```
 
+#### Step 6 — Deploy and access the per-cluster Grafana SLO dashboard
+
+In addition to ACM Observability's cross-cluster Thanos/Grafana, this demo deploys a dedicated **Grafana Community Operator** instance directly on the coffeeshop spoke cluster. It provides a 9-panel SLO dashboard with no dependency on the hub observability stack.
+
+The two Argo CD Applications are deployed in order by `oc apply -k argocd/` (items 14-15 in the kustomization):
+
+| Application | Path synced | Purpose |
+|---|---|---|
+| `slo-grafana-operator` | `grafana/operator/` | Installs the Grafana Community Operator v5 via OLM into `grafana-slo` namespace |
+| `slo-grafana-instance` | `grafana/instance/` | Deploys the Grafana CR, configures a Thanos Querier datasource, loads the SLO dashboard, and creates an OpenShift Route |
+
+> **Deployment order matters.** OLM takes ~2-3 minutes to register the `grafana.integreatly.org` CRDs after the Subscription is created. `slo-grafana-instance` uses `SkipDryRunOnMissingResource=true` to tolerate this window, but you may need to trigger a manual re-sync once the operator is healthy.
+
+```bash
+# Check both Grafana Applications are Synced/Healthy (run on hub)
+oc get application slo-grafana-operator slo-grafana-instance -n openshift-gitops
+
+# If slo-grafana-instance is OutOfSync due to CRD timing, force a re-sync
+oc patch application slo-grafana-instance -n openshift-gitops \
+  --type merge \
+  -p '{"operation": {"sync": {}}}'
+
+# Get the Grafana dashboard URL (run with KUBECONFIG pointing to coffeeshop cluster)
+oc get route -n grafana-slo -o jsonpath='https://{.items[0].spec.host}{"\n"}'
+```
+
+The dashboard panels include availability error ratio, p95 latency, error budget remaining, and active burn-rate alerts — all sourced from the Thanos Querier running on the coffeeshop cluster.
+
 ---
 
 ### Adding SLOs for New Clusters or Services
@@ -622,4 +673,25 @@ oc -n openshift-user-workload-monitoring exec \
 # Get the ACM Observability Grafana URL (hub cluster)
 oc get route grafana -n open-cluster-management-observability \
   -o jsonpath='https://{.spec.host}\n'
+
+# --- Grafana Community Operator (per-cluster SLO dashboard) ---
+
+# Check both Grafana Argo CD Applications are Synced/Healthy (hub cluster)
+oc get application slo-grafana-operator slo-grafana-instance -n openshift-gitops
+
+# Force a re-sync of the Grafana instance Application if CRD timing caused OutOfSync
+oc patch application slo-grafana-instance -n openshift-gitops \
+  --type merge \
+  -p '{"operation": {"sync": {}}}'
+
+# Get the Grafana dashboard URL on the coffeeshop spoke cluster
+# (requires KUBECONFIG pointing to the coffeeshop cluster)
+oc get route -n grafana-slo \
+  -o jsonpath='https://{.items[0].spec.host}{"\n"}'
+
+# Check that the Grafana pod is running on the coffeeshop cluster
+oc get pods -n grafana-slo
+
+# Check the Alertmanager config policy compliance across all clusters
+oc get policy alertmanager-config -n acm-policies
 ```
