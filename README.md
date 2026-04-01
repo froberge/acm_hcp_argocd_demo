@@ -401,7 +401,7 @@ To show a burn-rate alert firing, you can inject errors or throttle the applicat
 
 ```bash
 # On the coffeeshop cluster — scale down the app to simulate an outage
-oc scale deployment coffeeshop --replicas=0 -n coffeeshop
+oc scale deployment coffeeshop --replicas=0 -n coffeeshop-dev  --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
 
 # Watch the error ratio recording rule climb (run on the hub via ACM Observability,
 # or locally on the spoke via the user workload Prometheus)
@@ -411,7 +411,7 @@ watch -n 5 'oc -n openshift-user-workload-monitoring exec \
   curl -s "http://localhost:9090/api/v1/query?query=job:coffeeshop_http_errors:ratio_rate5m"'
 
 # Restore the application
-oc scale deployment coffeeshop --replicas=1 -n coffeeshop
+oc scale deployment coffeeshop --replicas=1 -n coffeeshop-dev  --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
 ```
 
 #### Step 5 — Observe across clusters via ACM Observability (optional)
@@ -470,7 +470,7 @@ oc patch application slo-grafana-instance -n openshift-gitops \
   -p '{"operation": {"sync": {}}}'
 
 # Get the Grafana dashboard URL (run with KUBECONFIG pointing to coffeeshop cluster)
-oc get route -n grafana-slo -o jsonpath='https://{.items[0].spec.host}{"\n"}'
+oc get route -n grafana-slo -o jsonpath='https://{.items[0].spec.host}{"\n"}' --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
 ```
 
 The dashboard panels include availability error ratio, p95 latency, error budget remaining, and active burn-rate alerts — all sourced from the Thanos Querier running on the coffeeshop cluster.
