@@ -217,10 +217,11 @@ This file is not automatically synced by Argo CD; it is applied manually for dem
 
 **SLO Ops** is the practice of managing SLOs as code, delivered via GitOps, and enforced consistently across every cluster in your fleet. In this demo:
 
-* SLO definitions live in the `slo/` directory as `PrometheusRule` objects.
+* SLO definitions live in the `slo/` directory as `PrometheusRule` objects deployed into `openshift-monitoring` on the spoke cluster.
 * Argo CD deploys them to the correct clusters (the coffeeshop spoke cluster in this case).
-* ACM Policies enforce the infrastructure prerequisites (user workload monitoring enabled) and raise a compliance violation if the rules are missing.
-* ACM Observability aggregates metrics across all clusters into a central Thanos instance so you can build a single cross-cluster SLO dashboard.
+* The SLOs use **kube-state-metrics** (always available in OpenShift) evaluated by the **platform Prometheus** (`prometheus-k8s`) — no application-level `ServiceMonitor` is required.
+* ACM Policies ensure user workload monitoring is enabled on all spokes, create the `coffeeshop` application namespace, and raise a compliance violation if the SLO `PrometheusRule` objects are missing from `openshift-monitoring`.
+* ACM Observability (optional, not installed by this demo) can aggregate metrics across all clusters into a central Thanos instance for a single cross-cluster SLO dashboard.
 
 ---
 
@@ -238,17 +239,18 @@ flowchart TD
         AppSLO["Application\napp-slo-coffeeshop"]
         PolicyInfra["Policy\nslo-infrastructure"]
         PolicyVerify["Policy\nslo-verify-coffeeshop"]
-        Thanos["ACM Observability\nThanos / Grafana"]
     end
 
     subgraph coffeeshop [Spoke: coffeeshop cluster]
-        UWM["User Workload\nPrometheus"]
-        SLO_A["PrometheusRule\ncoffeeshop-slo-availability"]
-        SLO_L["PrometheusRule\ncoffeeshop-slo-latency"]
-        App["coffeeshop\napplication"]
-        AM["Alertmanager"]
-        NS["Namespace\ncoffeeshop"]
-        CM["ConfigMap\ncluster-monitoring-config"]
+        subgraph openshift_monitoring ["Namespace: openshift-monitoring"]
+            PlatProm["Platform Prometheus\n(prometheus-k8s)"]
+            SLO_A["PrometheusRule\ncoffeeshop-slo-availability"]
+            SLO_L["PrometheusRule\ncoffeeshop-slo-latency (stability)"]
+            KSM["kube-state-metrics"]
+            AM["Alertmanager"]
+            CM["ConfigMap\ncluster-monitoring-config"]
+        end
+        NS["Namespace: coffeeshop\n(created by ACM policy)"]
     end
 
     Git -->|"sync argocd/"| ArgoCD
@@ -256,8 +258,8 @@ flowchart TD
     SpokePlacement --> SpokeGOC
     SpokeGOC -->|"register coffeeshop\nas Argo CD destination"| ArgoCD
     ArgoCD --> AppSLO
-    AppSLO -->|"deploy slo/"| SLO_A
-    AppSLO -->|"deploy slo/"| SLO_L
+    AppSLO -->|"deploy to openshift-monitoring"| SLO_A
+    AppSLO -->|"deploy to openshift-monitoring"| SLO_L
 
     ACM --> PolicyInfra
     PolicyInfra -->|enforce| CM
@@ -266,11 +268,10 @@ flowchart TD
     PolicyVerify -->|"inform: check existence"| SLO_A
     PolicyVerify -->|"inform: check existence"| SLO_L
 
-    App -->|"http_requests_total\nhttp_request_duration_seconds"| UWM
-    SLO_A --> UWM
-    SLO_L --> UWM
-    UWM -->|"SLO burn-rate alerts"| AM
-    UWM -->|"forward SLI metrics"| Thanos
+    KSM -->|"kube_pod_status_ready\nkube_pod_container_status_restarts_total"| PlatProm
+    SLO_A -->|"evaluated by"| PlatProm
+    SLO_L -->|"evaluated by"| PlatProm
+    PlatProm -->|"SLO burn-rate alerts"| AM
 ```
 
 ---
@@ -281,9 +282,10 @@ flowchart TD
 
 | Property | Value |
 |---|---|
-| **SLI** | Fraction of HTTP requests that return a non-5xx status code |
-| **SLO target** | 99.9 % over a 28-day rolling window |
-| **Error budget** | 0.1 % ≈ 40 minutes of permitted errors per 28 days |
+| **SLI** | Fraction of scrape intervals during which at least one coffeeshop pod is in the `Ready` state |
+| **Metric source** | `kube_pod_status_ready` from kube-state-metrics — no `ServiceMonitor` required |
+| **SLO target** | 99.9 % of scrape intervals have at least one ready pod over a 28-day rolling window |
+| **Error budget** | 0.1 % ≈ 40 minutes of permitted not-ready time per 28 days |
 
 Multi-burn-rate alerts:
 
@@ -294,21 +296,24 @@ Multi-burn-rate alerts:
 | `CoffeeshopAvailabilityWarningSlowBurn` | warning | 6 h + 3 d | 1 × | budget exhaustion imminent |
 | `CoffeeshopAvailabilityErrorBudgetLow` | info | 28 d | — | < 25 % budget remaining |
 
-#### Coffeeshop — Latency SLO (`slo/coffeeshop-slo-latency.yaml`)
+#### Coffeeshop — Stability SLO (`slo/coffeeshop-slo-latency.yaml`)
+
+> **Note on the filename:** `coffeeshop-slo-latency.yaml` defines the **stability** SLO (container restart rate), not a latency SLO. The filename reflects an earlier design iteration.
 
 | Property | Value |
 |---|---|
-| **SLI** | Fraction of HTTP requests served within 500 ms |
-| **SLO target** | 95 % of requests ≤ 500 ms over a 28-day rolling window |
-| **Error budget** | 5 % of requests may exceed 500 ms |
+| **SLI** | Container restart rate for coffeeshop pods |
+| **Metric source** | `kube_pod_container_status_restarts_total` from kube-state-metrics |
+| **SLO target** | Fewer than 1 restart per hour on average over a 28-day rolling window |
+| **Error budget** | ~672 container restarts permitted per 28 days |
 
 Multi-burn-rate alerts:
 
 | Alert | Severity | Windows | Burn rate | Budget consumed |
 |---|---|---|---|---|
-| `CoffeeshopLatencyCriticalFastBurn` | critical | 5 m + 1 h | 14.4 × | 2 % in 1 h — page now |
-| `CoffeeshopLatencyCriticalSlowBurn` | critical | 30 m + 6 h | 6 × | 5 % in 6 h — page soon |
-| `CoffeeshopLatencyWarningSlowBurn` | warning | 6 h + 3 d | 1 × | budget exhaustion imminent |
+| `CoffeeshopStabilityCriticalFastBurn` | critical | 5 m + 1 h | 14.4 × | 2 % in 1 h — page now |
+| `CoffeeshopStabilityCriticalSlowBurn` | critical | 30 m + 6 h | 6 × | 5 % in 6 h — page soon |
+| `CoffeeshopStabilityWarningSlowBurn` | warning | 6 h + 3 d | 1 × | budget exhaustion imminent |
 
 ---
 
@@ -342,8 +347,8 @@ Error rate 0.1 %  ──┘   1.0 × budget (warning)   → ticket within 6 hour
 
 | Policy | Placement | Action | Purpose |
 |---|---|---|---|
-| `slo-infrastructure` | all spokes | enforce | Enables user workload monitoring + creates the `coffeeshop` namespace |
-| `slo-verify-coffeeshop` | `coffeeshop` cluster only | inform | Reports NonCompliant if Argo CD has not yet deployed the SLO rules |
+| `slo-infrastructure` | all spokes | enforce | Enables user workload monitoring + creates the `coffeeshop` namespace (the SLO rules themselves go to `openshift-monitoring`) |
+| `slo-verify-coffeeshop` | `coffeeshop` cluster only | inform | Reports NonCompliant if the SLO `PrometheusRule` objects are missing from `openshift-monitoring` |
 
 The verify policy is scoped to the coffeeshop cluster only because the `PrometheusRule` objects are only deployed there — putting it on all spokes would produce a permanent violation on clusters that do not run the coffeeshop workload.
 
@@ -382,36 +387,37 @@ oc patch application slo-coffeeshop -n openshift-gitops \
 # Switch context to the coffeeshop cluster
 export KUBECONFIG=./kubeconfig   # extracted from the hosted cluster secret
 
-# Confirm both PrometheusRule objects exist
-oc get prometheusrule -n coffeeshop
+# Confirm both PrometheusRule objects exist in openshift-monitoring (platform Prometheus)
+oc get prometheusrule -n openshift-monitoring | grep coffeeshop
 
-# Confirm user workload monitoring is active
-oc get pods -n openshift-user-workload-monitoring
+# Confirm the platform Prometheus pods are running
+oc get pods -n openshift-monitoring -l app.kubernetes.io/name=prometheus
 
-# Query the SLI recording rule directly from the Prometheus API
-oc -n openshift-user-workload-monitoring exec -c prometheus \
-  $(oc get pod -n openshift-user-workload-monitoring -l app.kubernetes.io/name=prometheus -o name | head -1) \
-  -- curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_http_errors:ratio_rate5m' \
+# Query the pod-readiness SLI recording rule directly from the platform Prometheus API
+oc -n openshift-monitoring exec -c prometheus \
+  $(oc get pod -n openshift-monitoring -l app.kubernetes.io/name=prometheus -o name | head -1) \
+  -- curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_pod_notready:ratio_rate5m' \
   | python3 -m json.tool
 ```
 
 #### Step 4 — Simulate an SLO breach (demo scenario)
 
-To show a burn-rate alert firing, you can inject errors or throttle the application to push the error rate above the alert threshold:
+To show a burn-rate alert firing, scale the coffeeshop deployment to zero replicas. This makes all pods NotReady and drives the pod-readiness error ratio to 1.0, immediately triggering `CoffeeshopAvailabilityCriticalFastBurn`:
 
 ```bash
 # On the coffeeshop cluster — scale down the app to simulate an outage
-oc scale deployment coffeeshop --replicas=0 -n coffeeshop-dev  --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
+oc scale deployment coffeeshop --replicas=0 -n coffeeshop-dev \
+  --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
 
-# Watch the error ratio recording rule climb (run on the hub via ACM Observability,
-# or locally on the spoke via the user workload Prometheus)
-watch -n 5 'oc -n openshift-user-workload-monitoring exec \
-  $(oc get pod -n openshift-user-workload-monitoring -l app.kubernetes.io/name=prometheus -o name | head -1) \
+# Watch the pod-readiness not-ready ratio climb (platform Prometheus on the spoke)
+watch -n 30 'oc -n openshift-monitoring exec \
+  $(oc get pod -n openshift-monitoring -l app.kubernetes.io/name=prometheus -o name | head -1) \
   -c prometheus -- \
-  curl -s "http://localhost:9090/api/v1/query?query=job:coffeeshop_http_errors:ratio_rate5m"'
+  curl -s "http://localhost:9090/api/v1/query?query=job:coffeeshop_pod_notready:ratio_rate5m"'
 
 # Restore the application
-oc scale deployment coffeeshop --replicas=1 -n coffeeshop-dev  --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
+oc scale deployment coffeeshop --replicas=1 -n coffeeshop-dev \
+  --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
 ```
 
 #### Step 5 — Observe across clusters via ACM Observability (optional)
@@ -431,20 +437,20 @@ oc get managedclusteraddon observability-controller \
 oc get route grafana -n open-cluster-management-observability -o jsonpath='{.spec.host}'
 ```
 
-Useful PromQL queries for the ACM Grafana dashboards:
+Useful PromQL queries (if MCO is active, run in the ACM Observability Grafana; otherwise run locally on the spoke via port-forward or `oc exec`):
 
 ```promql
-# Error budget remaining (1 = full, 0 = exhausted) — all clusters
+# Availability error budget remaining (1 = full, 0 = exhausted)
 job:coffeeshop_availability_slo:error_budget_remaining
 
-# 5-minute error ratio per cluster
-job:coffeeshop_http_errors:ratio_rate5m
+# Pod not-ready ratio over 5 minutes (should be 0 when all pods are healthy)
+job:coffeeshop_pod_notready:ratio_rate5m
 
-# p95 latency per cluster
-job:coffeeshop_latency_p95:rate5m
+# Container restart rate over 5 minutes (should be 0 when stable)
+job:coffeeshop_restart_rate:rate5m
 
-# Active burn-rate alerts
-ALERTS{slo=~"availability|latency", service="coffeeshop"}
+# Active SLO burn-rate alerts
+ALERTS{service="coffeeshop"}
 ```
 
 #### Step 6 — Deploy and access the per-cluster Grafana SLO dashboard
@@ -646,30 +652,37 @@ oc get policy slo-infrastructure slo-verify-coffeeshop -n acm-policies
 # Check propagated policy status across all clusters
 oc get policy.open-cluster-management.io -A | grep slo
 
-# Verify PrometheusRules exist on the coffeeshop spoke cluster
+# Verify PrometheusRules exist in openshift-monitoring on the coffeeshop spoke cluster
 # (requires KUBECONFIG pointing to the coffeeshop cluster)
-oc get prometheusrule -n coffeeshop
+oc get prometheusrule -n openshift-monitoring | grep coffeeshop
 
-# Verify user workload monitoring pods are running on a spoke cluster
-oc get pods -n openshift-user-workload-monitoring
+# Verify the platform Prometheus pods are running on the spoke cluster
+oc get pods -n openshift-monitoring -l app.kubernetes.io/name=prometheus
 
-# Query the availability error ratio from the user workload Prometheus (spoke)
-oc -n openshift-user-workload-monitoring exec \
-  $(oc get pod -n openshift-user-workload-monitoring \
+# Query the pod-readiness not-ready ratio from the platform Prometheus (spoke)
+oc -n openshift-monitoring exec \
+  $(oc get pod -n openshift-monitoring \
     -l app.kubernetes.io/name=prometheus -o name | head -1) \
   -c prometheus -- \
-  curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_http_errors:ratio_rate5m'
+  curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_pod_notready:ratio_rate5m'
 
-# Query the remaining error budget (28-day window)
-oc -n openshift-user-workload-monitoring exec \
-  $(oc get pod -n openshift-user-workload-monitoring \
+# Query the availability error budget remaining (28-day window)
+oc -n openshift-monitoring exec \
+  $(oc get pod -n openshift-monitoring \
     -l app.kubernetes.io/name=prometheus -o name | head -1) \
   -c prometheus -- \
   curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_availability_slo:error_budget_remaining'
 
+# Query the container restart rate (stability SLI)
+oc -n openshift-monitoring exec \
+  $(oc get pod -n openshift-monitoring \
+    -l app.kubernetes.io/name=prometheus -o name | head -1) \
+  -c prometheus -- \
+  curl -s 'http://localhost:9090/api/v1/query?query=job:coffeeshop_restart_rate:rate5m'
+
 # Check active SLO burn-rate alerts
-oc -n openshift-user-workload-monitoring exec \
-  $(oc get pod -n openshift-user-workload-monitoring \
+oc -n openshift-monitoring exec \
+  $(oc get pod -n openshift-monitoring \
     -l app.kubernetes.io/name=prometheus -o name | head -1) \
   -c prometheus -- \
   curl -s 'http://localhost:9090/api/v1/alerts' | python3 -m json.tool
