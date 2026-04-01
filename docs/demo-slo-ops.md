@@ -213,11 +213,8 @@ In the console: go to **Observe → Alerting → Alerting rules tab**.
 The recording rules are evaluated by the **platform Prometheus** (`prometheus-k8s`), not the user workload Prometheus. Port-forward accordingly:
 
 ```bash
-# Ensure KUBECONFIG points to the coffeeshop cluster
-export KUBECONFIG=./kubeconfig   # extracted via: oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=.
-
 # Port-forward the platform Prometheus pod to localhost:9090
-oc port-forward -n openshift-monitoring \
+oc port-forward -n openshift-monitoring --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-) \
   $(oc get pod -n openshift-monitoring \
     -l app.kubernetes.io/name=prometheus -o name | head -1) \
   9090:9090
@@ -257,7 +254,7 @@ ALERTS{service="coffeeshop"}
 ```bash
 # On the coffeeshop cluster — take the app offline
 # The app runs in coffeeshop-dev; replace "coffeeshop" with the actual Deployment name if different
-oc scale deployment coffeeshop --replicas=0 -n coffeeshop-dev
+oc scale deployment coffeeshop --replicas=0 -n coffeeshop-dev --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
 ```
 
 Wait approximately 5–10 minutes for both the 5-minute and 1-hour recording rule windows to accumulate enough not-ready time, then query Prometheus:
@@ -283,7 +280,7 @@ In the **Alertmanager UI**, show the `CoffeeshopAvailabilityCriticalFastBurn` al
 
 ```bash
 # Restore the application
-oc scale deployment coffeeshop --replicas=1 -n coffeeshop-dev
+oc scale deployment coffeeshop --replicas=1 -n coffeeshop-dev --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
 ```
 
 ---

@@ -384,14 +384,11 @@ oc patch application slo-coffeeshop -n openshift-gitops \
 #### Step 3 — Verify the PrometheusRules on the coffeeshop cluster
 
 ```bash
-# Switch context to the coffeeshop cluster
-export KUBECONFIG=./kubeconfig   # extracted from the hosted cluster secret
-
 # Confirm both PrometheusRule objects exist in openshift-monitoring (platform Prometheus)
-oc get prometheusrule -n openshift-monitoring | grep coffeeshop
+oc get prometheusrule -n openshift-monitoring --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-) | grep coffeeshop
 
 # Confirm the platform Prometheus pods are running
-oc get pods -n openshift-monitoring -l app.kubernetes.io/name=prometheus
+oc get pods -n openshift-monitoring --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-) -l app.kubernetes.io/name=prometheus
 
 # Query the pod-readiness SLI recording rule directly from the platform Prometheus API
 oc -n openshift-monitoring exec -c prometheus \
