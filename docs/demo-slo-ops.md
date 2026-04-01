@@ -135,14 +135,11 @@ Point out the destination cluster is the **spoke** (coffeeshop), not the hub —
 **Talking point:** "The rules are now live on the spoke cluster's Prometheus instance, evaluating every 30 seconds against kube-state-metrics data — no application changes needed."
 
 ```bash
-# Switch to coffeeshop cluster kubeconfig
-export KUBECONFIG=./kubeconfig   # extracted via: oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=.
-
 # Confirm both PrometheusRules exist in openshift-monitoring
-oc get prometheusrule -n openshift-monitoring | grep coffeeshop
+oc get prometheusrule -n openshift-monitoring --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-) | grep coffeeshop
 
 # Confirm the platform Prometheus pods are running
-oc get pods -n openshift-monitoring -l app.kubernetes.io/name=prometheus
+oc get pods -n openshift-monitoring -l app.kubernetes.io/name=prometheus --kubeconfig=<(oc extract -n local-cluster secret/coffeeshop-admin-kubeconfig --to=-)
 ```
 
 ---
@@ -157,20 +154,7 @@ The PrometheusRules live in `openshift-monitoring` and are evaluated by the **pl
 
 **1. Get the coffeeshop cluster console URL** (run on the hub):
 
-```bash
-oc get hostedcluster coffeeshop -n local-cluster \
-  -o jsonpath='{.status.conditions[?(@.type=="Available")].message}'
-
-# Or directly from the ACM console:
-# Infrastructure → Clusters → coffeeshop → "Open console" link
-```
-
 **2. Log in** to the coffeeshop cluster console as `kubeadmin` (password from the `coffeeshop-kubeadmin-password` secret):
-
-```bash
-# Retrieve kubeadmin password (run on the hub)
-oc extract -n local-cluster secret/coffeeshop-kubeadmin-password --to=-
-```
 
 **3. Switch to the Administrator perspective** — in the top-left corner of the console, click the perspective switcher (it may say "Developer") and select **Administrator**.
 The Administrator perspective has the full PromQL query interface. The Developer perspective has a simplified metrics browser that does not accept raw PromQL.
@@ -239,7 +223,9 @@ oc port-forward -n openshift-monitoring \
   9090:9090
 ```
 
-Open **http://localhost:9090** in a browser. Click on the **Graph** tab, paste each expression into the input field, and press **Execute**.
+Open **http://localhost:9090/graph** in a browser, paste each expression into the input field, and press **Execute**.
+
+> **Note:** Opening `http://localhost:9090` (root) returns a 404 because OpenShift's `prometheus-k8s` is compiled with `--web.external-url` pointing to its OAuth proxy hostname. The root path `/` redirects to that hostname (not `localhost`). Use `http://localhost:9090/graph` directly.
 
 ---
 
